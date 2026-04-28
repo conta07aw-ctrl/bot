@@ -465,10 +465,28 @@ class Dispatcher {
       const worstFee = Math.max((1 - kalshiLivePrice) * kalshiFee, (1 - polyLiveAsk) * polyFee);
       const maxCombined = (1.00 - worstFee) / (1 + (signal.minRoiPct ?? 3) / 100);
       const dynamicImprovement = Math.max(0, maxCombined - rawCombined);
-      // Round UP so sub-cent improvement always becomes at least 1¢ effective.
-      // Math.round was killing 0.3-0.8¢ improvements → FAK at exact ask → 0 fills.
-      const polyOrderPrice = Math.ceil((polyLiveAsk + dynamicImprovement) * 100) / 100;
-      const kalshiOrderPrice = kalshiLivePrice;
+      // Split improvement across BOTH legs to reduce one-sided fill risk.
+      // One-sided pricing (all improvement on Poly) lowers Poly fails but can
+      // still leave Kalshi at exact ask, increasing hedge events.
+      const halfImp = dynamicImprovement / 2;
+      let kalshiOrderPrice = Math.ceil((kalshiLivePrice + halfImp) * 100) / 100;
+      let polyOrderPrice = Math.ceil((polyLiveAsk + halfImp) * 100) / 100;
+
+      // Respect exchange contract bounds and keep taker-ish intent.
+      kalshiOrderPrice = Math.min(0.99, Math.max(kalshiLivePrice, kalshiOrderPrice));
+      polyOrderPrice = Math.min(0.99, Math.max(polyLiveAsk, polyOrderPrice));
+
+      // Ceil-rounding on both legs can overshoot the combined ROI budget by 1-2¢.
+      // Pull back, preferring to trim Poly first (usually slower leg).
+      while ((kalshiOrderPrice + polyOrderPrice) > maxCombined + 1e-9) {
+        if (polyOrderPrice - 0.01 >= polyLiveAsk) {
+          polyOrderPrice = Math.round((polyOrderPrice - 0.01) * 100) / 100;
+        } else if (kalshiOrderPrice - 0.01 >= kalshiLivePrice) {
+          kalshiOrderPrice = Math.round((kalshiOrderPrice - 0.01) * 100) / 100;
+        } else {
+          break;
+        }
+      }
 
       // Validate the ceil-rounded price still meets the ROI floor.
       // If rounding up pushed the effective combined above budget, skip — the
@@ -488,7 +506,11 @@ class Dispatcher {
         });
       }
 
-      console.log(`[Dispatcher] dynamic improvement: ${(dynamicImprovement * 100).toFixed(1)}¢ → FAK@${polyOrderPrice} (effective roi=${effectiveRoi.toFixed(1)}%, raw=$${rawCombined.toFixed(3)} max=$${maxCombined.toFixed(3)})`);
+      console.log(
+        `[Dispatcher] dynamic improvement: ${(dynamicImprovement * 100).toFixed(1)}¢ `
+        + `→ K@${kalshiOrderPrice.toFixed(2)} P@${polyOrderPrice.toFixed(2)} `
+        + `(effective roi=${effectiveRoi.toFixed(1)}%, raw=$${rawCombined.toFixed(3)} max=$${maxCombined.toFixed(3)})`
+      );
 
       const kalshiOrder = {
         ticker: signal.kalshiTicker,
@@ -534,13 +556,9 @@ class Dispatcher {
       }
       const polyOk = polyResult !== null;
 
-      let polyFilledQty = 0;
-      if (polyOk) {
-        const makingAmt = parseFloat(polyResult.makingAmount);
-        if (makingAmt > 0 && polyOrderPrice > 0) {
-          polyFilledQty = Math.round(makingAmt / polyOrderPrice);
-        }
-      }
+      const polyFilledQty = polyOk
+        ? this._extractPolyFilledQty(polyResult, 'BUY', polyOrderPrice, adjustedUnits)
+        : 0;
 
       console.log(
         `[Dispatcher] PARALLEL settled in ${totalMs}ms — `
@@ -636,7 +654,7 @@ class Dispatcher {
       // Track matched contracts for early exit monitoring
       if (matchedQty > 0) {
         const entryRoiPct = signal.roiPct ?? signal.minRoiPct ?? 3;
-        const polyTakingAmt = parseFloat(polyResult?.takingAmount || '0');
+        const polyFilledQtySafe = Math.max(0, Number(polyFilledQty || 0));
         this._openPositions.push({
           id: result.id,
           asset: signal.asset,
@@ -651,12 +669,12 @@ class Dispatcher {
           entryCost: kalshiOrderPrice + polyOrderPrice,
           kalshiFee: signal.kalshiFee ?? 0,
           polyFee: signal.polyFee ?? 0,
-          polyTakingAmount: polyTakingAmt,
+          polyFilledQty: polyFilledQtySafe,
           entryRoiPct,
           entryTime: Date.now(),
           readyAt: Date.now() + 15_000,
         });
-        console.log(`[EarlyExit] tracking position: ${signal.asset} Leg${signal.leg} x${matchedQty} polyTokens=${polyTakingAmt.toFixed(2)} cost=$${(kalshiOrderPrice + polyOrderPrice).toFixed(3)} minExitROI=${entryRoiPct.toFixed(2)}% (ready in 15s)`);
+        console.log(`[EarlyExit] tracking position: ${signal.asset} Leg${signal.leg} x${matchedQty} polyTokens=${polyFilledQtySafe.toFixed(2)} cost=$${(kalshiOrderPrice + polyOrderPrice).toFixed(3)} minExitROI=${entryRoiPct.toFixed(2)}% (ready in 15s)`);
       }
 
       return result;
@@ -1095,6 +1113,41 @@ class Dispatcher {
   }
 
   /**
+   * Infer filled base-contract quantity from a Polymarket order response.
+   *
+   * The CLOB response may expose different fields by route/side
+   * (makingAmount, takingAmount, sizeMatched). We normalize to contracts and
+   * clamp by requested size to avoid over-counting.
+   */
+  _extractPolyFilledQty(polyResult, side, price, requestedSize) {
+    if (!polyResult) return 0;
+
+    const req = Math.max(0, Number(requestedSize || 0));
+    const p = Number(price || 0);
+    const makingAmt = Number(polyResult.makingAmount || 0);
+    const takingAmt = Number(polyResult.takingAmount || 0);
+    const sizeMatched = Number(polyResult.sizeMatched || 0);
+    const candidates = [];
+
+    if (sizeMatched > 0) candidates.push(sizeMatched);
+
+    if (side === 'BUY') {
+      if (takingAmt > 0) candidates.push(takingAmt);
+      if (makingAmt > 0 && p > 0) candidates.push(makingAmt / p);
+    } else {
+      if (makingAmt > 0) candidates.push(makingAmt);
+      if (takingAmt > 0 && p > 0) candidates.push(takingAmt / p);
+    }
+
+    const positives = candidates.filter(v => Number.isFinite(v) && v > 0);
+    if (positives.length === 0) return 0;
+
+    const inferred = Math.min(...positives);
+    const clamped = req > 0 ? Math.min(inferred, req) : inferred;
+    return Math.max(0, Math.floor(clamped * 10_000) / 10_000);
+  }
+
+  /**
    * Re-validate an arbitrage with LIVE prices, applying the same ROI /
    * entrySize guards the decisionEngine used at signal time.
    *
@@ -1272,10 +1325,10 @@ class Dispatcher {
               // Fallback: after 30s of failed balance checks, estimate from actual fill
               const elapsed = Date.now() - pos.entryTime;
               if (elapsed > 30_000) {
-                const rawTokens = pos.polyTakingAmount || pos.qty;
+                const rawTokens = pos.polyFilledQty || pos.qty;
                 const estimatedBal = Math.floor(rawTokens * (1 - pos.polyFee) * 100) / 100;
                 pos._polyBalance = estimatedBal;
-                console.warn(`[EarlyExit] ${pos.asset} Leg${pos.leg}: balance API returned ${bal} after ${(elapsed / 1000).toFixed(0)}s — using estimate ${estimatedBal} (from takingAmt=${rawTokens.toFixed(2)})`);
+                console.warn(`[EarlyExit] ${pos.asset} Leg${pos.leg}: balance API returned ${bal} after ${(elapsed / 1000).toFixed(0)}s — using estimate ${estimatedBal} (from filledQty=${rawTokens.toFixed(2)})`);
               } else {
                 pos._balanceRetries = (pos._balanceRetries || 0) + 1;
                 if (pos._balanceRetries % 20 === 1) {
@@ -1334,7 +1387,7 @@ class Dispatcher {
         }
 
         // Only exit when net profit (after ALL fees) exceeds $0.20
-        const MIN_EXIT_PROFIT = 0.15
+        const MIN_EXIT_PROFIT = 0.20;
         if (netProfit < MIN_EXIT_PROFIT) continue;
 
         pos._exiting = true;
@@ -1406,11 +1459,9 @@ class Dispatcher {
     const polyResult = !skipPolySell && settled[1]?.status === 'fulfilled' ? settled[1].value : null;
     const kalshiSold = kalshiResult?._actualFilled || (kalshiResult ? kalshiQty : 0);
 
-    let polySold = 0;
-    if (polyResult) {
-      const takingAmt = parseFloat(polyResult.takingAmount || '0');
-      if (takingAmt > 0) polySold = polyQty;
-    }
+    const polySold = polyResult
+      ? this._extractPolyFilledQty(polyResult, 'SELL', polyBid, polyQty)
+      : 0;
 
     // --- Revenue net of exit fees ---
     const kalshiGross = kalshiSold > 0 ? kalshiBid * kalshiSold : 0;
