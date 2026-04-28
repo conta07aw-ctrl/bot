@@ -135,11 +135,6 @@ class PolymarketConnector extends EventEmitter {
       params,
       timeout: 10_000,
     };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(`${this.clobUrl}${path}`, opts);
     return resp.data;
   }
@@ -158,11 +153,6 @@ class PolymarketConnector extends EventEmitter {
       headers,
       timeout: 10_000,
     };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(fullUrl, opts);
     return resp.data;
   }
@@ -413,11 +403,8 @@ class PolymarketConnector extends EventEmitter {
 
   _connectWs() {
     try {
-      const wsOptions = {};
-    if (process.env.POLY_PROXY_URL) {
-      wsOptions.agent = new HttpsProxyAgent(process.env.POLY_PROXY_URL);
-    }
-    this._ws = new WebSocket(CLOB_WS_URL, wsOptions);
+      // WS should stay direct. Proxy is reserved for order placement only.
+      this._ws = new WebSocket(CLOB_WS_URL);
     } catch (err) {
       console.error('[Polymarket WS] failed to create connection:', err.message);
       this._scheduleReconnect();
@@ -444,7 +431,18 @@ class PolymarketConnector extends EventEmitter {
 
     this._ws.on('message', (raw) => {
       try {
-        const msgs = JSON.parse(raw.toString());
+        const text = raw.toString().trim();
+        if (!text) return;
+        if (text[0] !== '{' && text[0] !== '[') {
+          // CLOB occasionally sends plain-text protocol errors (e.g. "INVALID OPERATION").
+          // These are not JSON payloads and should not crash/log-spam the WS handler.
+          if (!this._lastNonJsonWsLogAt || (Date.now() - this._lastNonJsonWsLogAt) > 10_000) {
+            this._lastNonJsonWsLogAt = Date.now();
+            console.warn(`[Polymarket WS] non-JSON message ignored: ${text.slice(0, 120)}`);
+          }
+          return;
+        }
+        const msgs = JSON.parse(text);
         // Messages can be a single object or an array
         const arr = Array.isArray(msgs) ? msgs : [msgs];
         for (const msg of arr) {
