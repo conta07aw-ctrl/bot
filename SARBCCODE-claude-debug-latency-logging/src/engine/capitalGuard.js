@@ -28,8 +28,8 @@ const POLYGON_RPCS = [
   'https://rpc.ankr.com/polygon',             // Ankr
 ];
 // pUSD on Polygon (CLOB v2 collateral token)
-const USDC_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
-const USDC_ABI = ['function balanceOf(address) view returns (uint256)'];
+const PUSD_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
+const PUSD_ABI = ['function balanceOf(address) view returns (uint256)'];
 
 const BALANCE_CACHE_MS = 10_000; // refresh balances every 10s
 
