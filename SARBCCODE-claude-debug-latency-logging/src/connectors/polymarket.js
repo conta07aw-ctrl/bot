@@ -18,7 +18,6 @@ const {
   ClobClient,
   Chain,
   createL2Headers,
-  orderToJsonV2,
   OrderType,
   Side,
   SignatureTypeV2,
@@ -900,15 +899,9 @@ class PolymarketConnector extends EventEmitter {
   }
 
   /**
-   * Post a single FOK order. Returns response or null on failure.
-   *
-   * Implementation note: this method does NOT use ClobClient.createAndPostOrder
-   * because that path uses an internal axios instance that may bypass the proxy
-   * settings needed for residential routing. Instead, we create a signed v2 order
-   * locally via the official client, then POST directly with axios using an
-   * explicit httpsAgent when POLY_PROXY_URL is configured.
-   * This is the only reliable way to force the request through the Decodo
-   * Mexico exit, bypassing Polymarket's USA geoblock.
+   * Post a single order via official CLOB v2 SDK create+post flow.
+   * Keeping serialization + auth inside the SDK avoids manual wire drift
+   * that can produce "invalid signature" responses.
    */
   async _postOrder(tokenId, price, size, side, orderType = 'FOK') {
     if (!this.wallet) {
@@ -927,9 +920,6 @@ class PolymarketConnector extends EventEmitter {
           : orderType === 'GTD'
             ? OrderType.GTD
             : OrderType.GTC;
-      if (!['FOK','FAK','GTD','GTC'].includes(orderType)) {
-        console.warn(`[Polymarket] unknown orderType ${orderType}, falling back to GTC`);
-      }
       const orderSide = side === 'BUY' ? Side.BUY : Side.SELL;
       const orderToSign = {
         tokenID: tokenId,
@@ -937,65 +927,15 @@ class PolymarketConnector extends EventEmitter {
         size,
         side: orderSide,
       };
-
-      const signedOrder = await this._clobClient.createOrder(orderToSign);
-      const payload = orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false);
-
-      const path = '/order';
-      const bodyStr = JSON.stringify(payload);
-      this._ensureViemWallet();
-      const headers = await createL2Headers(
-        this.viemWallet || this.wallet,
-        { key: this.apiKey, secret: this.apiSecret, passphrase: this.passphrase },
-        { method: 'POST', requestPath: path, body: bodyStr },
-      );
-
-      const proxyAgent = this._getProxyAgent();
-      const axiosConfig = {
-        method: 'POST',
-        url: `${this.clobUrl}${path}`,
-        data: payload,
-        headers,
-        timeout: 15_000,
-        maxRedirects: 0,
-        httpsAgent: proxyAgent || clobAgent,
-      };
-      if (proxyAgent) axiosConfig.proxy = false;
-
-      // 4) POST order.
-      // Proxy is preferred/required for geo-routed setups.
-      // Optional direct fallback is OFF by default and can be enabled with:
-      //   POLY_ALLOW_DIRECT_FALLBACK=1
       const t0 = Date.now();
-      let resp;
-      try {
-        resp = await axios(axiosConfig);
-      } catch (err) {
-        const status = err.response?.status || err.status || null;
-        const errText = JSON.stringify(err.response?.data || err.message || '').toLowerCase();
-        const proxyDenied = status === 407
-          || errText.includes('traffic limit')
-          || errText.includes('access denied');
-
-        const allowDirectFallback = process.env.POLY_ALLOW_DIRECT_FALLBACK === '1';
-        if (proxyAgent && proxyDenied && allowDirectFallback) {
-          console.warn('[Polymarket] proxy denied order request — retrying direct (no proxy)');
-          const directConfig = {
-            ...axiosConfig,
-            httpsAgent: clobAgent,
-          };
-          delete directConfig.proxy;
-          resp = await axios(directConfig);
-        } else if (proxyAgent && proxyDenied && !allowDirectFallback) {
-          console.error('[Polymarket] proxy denied order request and direct fallback is disabled (set POLY_ALLOW_DIRECT_FALLBACK=1 to enable)');
-          throw err;
-        } else {
-          throw err;
-        }
-      }
+      const resp = await this._clobClient.createAndPostOrder(
+        orderToSign,
+        { tickSize: '0.01' },
+        orderTypeEnum,
+      );
       const postLatencyMs = Date.now() - t0;
-      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (direct)`);
-      const data = resp.data;
+      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (sdk)`);
+      const data = resp?.data || resp;
 
       // CLOB returns 200 with {error: "..."} on validation failures
       if (data && data.error) {
