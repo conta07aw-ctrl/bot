@@ -927,7 +927,16 @@ class PolymarketConnector extends EventEmitter {
     this._lastOrderError = null;
 
     try {
-      const orderTypeEnum = orderType === 'FOK' ? OrderType.FOK : orderType === 'GTD' ? OrderType.GTD : OrderType.GTC;
+      const orderTypeEnum = orderType === 'FOK'
+        ? OrderType.FOK
+        : orderType === 'FAK'
+          ? OrderType.FAK
+          : orderType === 'GTD'
+            ? OrderType.GTD
+            : OrderType.GTC;
+      if (!['FOK','FAK','GTD','GTC'].includes(orderType)) {
+        console.warn(`[Polymarket] unknown orderType ${orderType}, falling back to GTC`);
+      }
       const orderSide = side === 'BUY' ? Side.BUY : Side.SELL;
       const orderToSign = {
         tokenID: tokenId,
