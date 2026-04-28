@@ -60,8 +60,9 @@ class CapitalGuard {
       new ethers.JsonRpcProvider(rpcUrl, 137, {
         staticNetwork: true,
         batchMaxCount: 1,
-      });
-    });
+        ...providerOptions,
+      })
+    );
 
     // Background refresh state. Started via start() — keeps the dispatcher
     // critical path (canTrade) completely free of network I/O.
