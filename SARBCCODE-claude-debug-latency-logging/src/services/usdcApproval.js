@@ -43,10 +43,13 @@ const MAX_UINT256 = ethers.MaxUint256;
  * @returns {{ pusd: boolean, ctf: boolean, isProxy: boolean }}
  */
 async function checkAndApprove(privateKey, funderAddress) {
-  const providerOptions = process.env.POLY_PROXY_URL ? { httpsAgent: new HttpsProxyAgent(process.env.POLY_PROXY_URL) } : {};
-  const provider = new ethers.JsonRpcProvider(POLYGON_RPC, 137, {
+  const proxyAgent = process.env.POLY_PROXY_URL ? new HttpsProxyAgent(process.env.POLY_PROXY_URL) : null;
+  const request = new ethers.FetchRequest(POLYGON_RPC);
+  if (proxyAgent) {
+    request.getUrlFunc = ethers.FetchRequest.createGetUrlFunc({ agent: proxyAgent });
+  }
+  const provider = new ethers.JsonRpcProvider(request, 137, {
     staticNetwork: true,
-    ...providerOptions,
   });
   const wallet = new ethers.Wallet(privateKey, provider);
   const signerAddr = wallet.address;

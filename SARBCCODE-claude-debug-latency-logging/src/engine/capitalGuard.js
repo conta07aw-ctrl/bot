@@ -28,8 +28,8 @@ const POLYGON_RPCS = [
   'https://rpc.ankr.com/polygon',             // Ankr
 ];
 // pUSD on Polygon (CLOB v2 collateral token)
-const USDC_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
-const USDC_ABI = ['function balanceOf(address) view returns (uint256)'];
+const PUSD_ADDRESS = '0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB';
+const PUSD_ABI = ['function balanceOf(address) view returns (uint256)'];
 
 const BALANCE_CACHE_MS = 10_000; // refresh balances every 10s
 
@@ -49,14 +49,17 @@ class CapitalGuard {
     // Reusable Polygon RPC providers — created once, used for every balance
     // fetch. Previously a new provider was created per RPC per call (5 × every
     // 60s + after each trade), leaking sockets/timers/listeners indefinitely.
-    const providerOptions = process.env.POLY_PROXY_URL ? { httpsAgent: new HttpsProxyAgent(process.env.POLY_PROXY_URL) } : {};
-    this._polygonProviders = POLYGON_RPCS.map(rpcUrl =>
-      new ethers.JsonRpcProvider(rpcUrl, 137, {
+    const proxyAgent = process.env.POLY_PROXY_URL ? new HttpsProxyAgent(process.env.POLY_PROXY_URL) : null;
+    this._polygonProviders = POLYGON_RPCS.map((rpcUrl) => {
+      const request = new ethers.FetchRequest(rpcUrl);
+      if (proxyAgent) {
+        request.getUrlFunc = ethers.FetchRequest.createGetUrlFunc({ agent: proxyAgent });
+      }
+      return new ethers.JsonRpcProvider(request, 137, {
         staticNetwork: true,
         batchMaxCount: 1,
-        ...providerOptions,
-      })
-    );
+      });
+    });
 
     // Background refresh state. Started via start() — keeps the dispatcher
     // critical path (canTrade) completely free of network I/O.
