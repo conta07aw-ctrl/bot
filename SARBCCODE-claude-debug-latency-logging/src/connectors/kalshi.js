@@ -653,6 +653,13 @@ class KalshiConnector extends EventEmitter {
     if (this._pingTimer) clearInterval(this._pingTimer);
     this._pingTimer = setInterval(() => {
       if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+        const silentForMs = Date.now() - this._lastPongAt;
+        if (this._lastPongAt > 0 && silentForMs > 45_000) {
+          console.warn(`[Kalshi WS] pong timeout (${silentForMs}ms) — forcing reconnect`);
+          // terminate() triggers close promptly on half-open sockets.
+          this._ws.terminate();
+          return;
+        }
         this._ws.ping();
       }
     }, 15_000);
@@ -669,6 +676,8 @@ class KalshiConnector extends EventEmitter {
 
   _scheduleReconnect() {
     if (this._reconnectTimer) return;
+    if (!this.apiKey || !this.privateKey) return;
+    if (this._subscribedTickers.size === 0) return;
 
     console.log(`[Kalshi WS] reconnecting in ${this._reconnectDelay}ms...`);
     this._reconnectTimer = setTimeout(() => {
