@@ -465,10 +465,28 @@ class Dispatcher {
       const worstFee = Math.max((1 - kalshiLivePrice) * kalshiFee, (1 - polyLiveAsk) * polyFee);
       const maxCombined = (1.00 - worstFee) / (1 + (signal.minRoiPct ?? 3) / 100);
       const dynamicImprovement = Math.max(0, maxCombined - rawCombined);
-      // Round UP so sub-cent improvement always becomes at least 1¢ effective.
-      // Math.round was killing 0.3-0.8¢ improvements → FAK at exact ask → 0 fills.
-      const polyOrderPrice = Math.ceil((polyLiveAsk + dynamicImprovement) * 100) / 100;
-      const kalshiOrderPrice = kalshiLivePrice;
+      // Split improvement across BOTH legs to reduce one-sided fill risk.
+      // One-sided pricing (all improvement on Poly) lowers Poly fails but can
+      // still leave Kalshi at exact ask, increasing hedge events.
+      const halfImp = dynamicImprovement / 2;
+      let kalshiOrderPrice = Math.ceil((kalshiLivePrice + halfImp) * 100) / 100;
+      let polyOrderPrice = Math.ceil((polyLiveAsk + halfImp) * 100) / 100;
+
+      // Respect exchange contract bounds and keep taker-ish intent.
+      kalshiOrderPrice = Math.min(0.99, Math.max(kalshiLivePrice, kalshiOrderPrice));
+      polyOrderPrice = Math.min(0.99, Math.max(polyLiveAsk, polyOrderPrice));
+
+      // Ceil-rounding on both legs can overshoot the combined ROI budget by 1-2¢.
+      // Pull back, preferring to trim Poly first (usually slower leg).
+      while ((kalshiOrderPrice + polyOrderPrice) > maxCombined + 1e-9) {
+        if (polyOrderPrice - 0.01 >= polyLiveAsk) {
+          polyOrderPrice = Math.round((polyOrderPrice - 0.01) * 100) / 100;
+        } else if (kalshiOrderPrice - 0.01 >= kalshiLivePrice) {
+          kalshiOrderPrice = Math.round((kalshiOrderPrice - 0.01) * 100) / 100;
+        } else {
+          break;
+        }
+      }
 
       // Validate the ceil-rounded price still meets the ROI floor.
       // If rounding up pushed the effective combined above budget, skip — the
@@ -488,7 +506,11 @@ class Dispatcher {
         });
       }
 
-      console.log(`[Dispatcher] dynamic improvement: ${(dynamicImprovement * 100).toFixed(1)}¢ → FAK@${polyOrderPrice} (effective roi=${effectiveRoi.toFixed(1)}%, raw=$${rawCombined.toFixed(3)} max=$${maxCombined.toFixed(3)})`);
+      console.log(
+        `[Dispatcher] dynamic improvement: ${(dynamicImprovement * 100).toFixed(1)}¢ `
+        + `→ K@${kalshiOrderPrice.toFixed(2)} P@${polyOrderPrice.toFixed(2)} `
+        + `(effective roi=${effectiveRoi.toFixed(1)}%, raw=$${rawCombined.toFixed(3)} max=$${maxCombined.toFixed(3)})`
+      );
 
       const kalshiOrder = {
         ticker: signal.kalshiTicker,
