@@ -288,8 +288,21 @@ class PolymarketConnector extends EventEmitter {
       return false;
     }
 
+    const signerAddr = this.viemWallet.account.address.toLowerCase();
+    const proxyAddr = (this.funderAddress || '').toLowerCase();
+    const useProxy = proxyAddr && proxyAddr !== signerAddr;
+    const signatureType = useProxy ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
+    const clientConfig = {
+      host: this.clobUrl,
+      chain: Chain.POLYGON,
+      signer: this.viemWallet,
+      signatureType,
+      funderAddress: useProxy ? this.funderAddress : undefined,
+      retryOnError: true,
+    };
+
     try {
-      const client = new ClobClient({ host: this.clobUrl, chain: Chain.POLYGON, signer: this.viemWallet });
+      const client = new ClobClient(clientConfig);
       const creds = await client.createOrDeriveApiKey();
       console.log(`[Polymarket] createOrDeriveApiKey response: ${JSON.stringify(creds).slice(0, 200)}`);
 
@@ -298,23 +311,13 @@ class PolymarketConnector extends EventEmitter {
         this.apiSecret = creds.secret;
         this.passphrase = creds.passphrase;
 
-        const signerAddr = this.viemWallet.account.address.toLowerCase();
-        const proxyAddr = (this.funderAddress || '').toLowerCase();
-        const useProxy = proxyAddr && proxyAddr !== signerAddr;
-        const signatureType = useProxy ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
-
         this._clobClient = new ClobClient({
-          host: this.clobUrl,
-          chain: Chain.POLYGON,
-          signer: this.viemWallet,
+          ...clientConfig,
           creds: {
             key: this.apiKey,
             secret: this.apiSecret,
             passphrase: this.passphrase,
           },
-          signatureType,
-          funderAddress: useProxy ? this.funderAddress : undefined,
-          retryOnError: true,
         });
 
         console.log(`[Polymarket] API keys derived successfully (apiKey: ${this.apiKey.slice(0, 8)}...)`);
@@ -329,22 +332,13 @@ class PolymarketConnector extends EventEmitter {
 
     if (!this._clobClient && this.apiKey && this.apiSecret) {
       try {
-        const signerAddr = this.viemWallet.account.address.toLowerCase();
-        const proxyAddr = (this.funderAddress || '').toLowerCase();
-        const useProxy = proxyAddr && proxyAddr !== signerAddr;
-        const signatureType = useProxy ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
         this._clobClient = new ClobClient({
-          host: this.clobUrl,
-          chain: Chain.POLYGON,
-          signer: this.viemWallet,
+          ...clientConfig,
           creds: {
             key: this.apiKey,
             secret: this.apiSecret,
             passphrase: this.passphrase,
           },
-          signatureType,
-          funderAddress: useProxy ? this.funderAddress : undefined,
-          retryOnError: true,
         });
         console.log(`[Polymarket] ClobClient created with STORED keys (apiKey: ${this.apiKey.slice(0, 8)}...)`);
         return true;
@@ -670,17 +664,18 @@ class PolymarketConnector extends EventEmitter {
       if (m.yesTokenId) tokenIds.push(m.yesTokenId);
       if (m.noTokenId) tokenIds.push(m.noTokenId);
     }
+    const deduped = [...new Set(tokenIds)];
 
-    if (tokenIds.length === 0) return;
+    if (deduped.length === 0) return;
 
-    console.log(`[Polymarket WS] subscribing to ${tokenIds.length} token streams`);
+    console.log(`[Polymarket WS] subscribing to ${deduped.length} token streams`);
 
-    // Polymarket CLOB WS subscription: assets_ids is an ARRAY, sent in one message
+    // Polymarket CLOB WS subscription: keep payload minimal/strict.
+    // Extra fields (e.g. custom_feature_enabled/auth stubs) can trigger
+    // plain-text "INVALID OPERATION" frames on some gateway versions.
     this._wsSend({
-      auth: {},
       type: 'market',
-      assets_ids: tokenIds,
-      custom_feature_enabled: true
+      assets_ids: deduped,
     });
   }
 
@@ -967,9 +962,37 @@ class PolymarketConnector extends EventEmitter {
       };
       if (proxyAgent) axiosConfig.proxy = false;
 
-      // 4) Direct POST — bypasses ClobClient entirely
+      // 4) POST order.
+      // Proxy is preferred/required for geo-routed setups.
+      // Optional direct fallback is OFF by default and can be enabled with:
+      //   POLY_ALLOW_DIRECT_FALLBACK=1
       const t0 = Date.now();
-      const resp = await axios(axiosConfig);
+      let resp;
+      try {
+        resp = await axios(axiosConfig);
+      } catch (err) {
+        const status = err.response?.status || err.status || null;
+        const errText = JSON.stringify(err.response?.data || err.message || '').toLowerCase();
+        const proxyDenied = status === 407
+          || errText.includes('traffic limit')
+          || errText.includes('access denied');
+
+        const allowDirectFallback = process.env.POLY_ALLOW_DIRECT_FALLBACK === '1';
+        if (proxyAgent && proxyDenied && allowDirectFallback) {
+          console.warn('[Polymarket] proxy denied order request — retrying direct (no proxy)');
+          const directConfig = {
+            ...axiosConfig,
+            httpsAgent: clobAgent,
+          };
+          delete directConfig.proxy;
+          resp = await axios(directConfig);
+        } else if (proxyAgent && proxyDenied && !allowDirectFallback) {
+          console.error('[Polymarket] proxy denied order request and direct fallback is disabled (set POLY_ALLOW_DIRECT_FALLBACK=1 to enable)');
+          throw err;
+        } else {
+          throw err;
+        }
+      }
       const postLatencyMs = Date.now() - t0;
       console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (direct)`);
       const data = resp.data;
