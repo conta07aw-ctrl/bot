@@ -49,13 +49,15 @@ class CapitalGuard {
     // Reusable Polygon RPC providers — created once, used for every balance
     // fetch. Previously a new provider was created per RPC per call (5 × every
     // 60s + after each trade), leaking sockets/timers/listeners indefinitely.
-    const proxyAgent = process.env.POLY_PROXY_URL ? new HttpsProxyAgent(process.env.POLY_PROXY_URL) : null;
-    this._polygonProviders = POLYGON_RPCS.map((rpcUrl) => {
-      const request = new ethers.FetchRequest(rpcUrl);
-      if (proxyAgent) {
-        request.getUrlFunc = ethers.FetchRequest.createGetUrlFunc({ agent: proxyAgent });
-      }
-      return new ethers.JsonRpcProvider(request, 137, {
+    // Do NOT reuse POLY_PROXY_URL for Polygon RPC by default. That proxy is
+    // intended for Polymarket CLOB routing and can reject generic RPC calls
+    // (407), resulting in persistent "Polymarket: N/A" balances.
+    // If needed, use a dedicated RPC proxy env var.
+    const providerOptions = process.env.POLYGON_RPC_PROXY_URL
+      ? { httpsAgent: new HttpsProxyAgent(process.env.POLYGON_RPC_PROXY_URL) }
+      : {};
+    this._polygonProviders = POLYGON_RPCS.map(rpcUrl =>
+      new ethers.JsonRpcProvider(rpcUrl, 137, {
         staticNetwork: true,
         batchMaxCount: 1,
       });

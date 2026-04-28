@@ -121,12 +121,10 @@ class PolymarketConnector extends EventEmitter {
   }
 
   async _gammaGet(path, params = {}) {
+    // Gamma should be accessed directly. Routing it through the CLOB trading
+    // proxy can return 407 (proxy auth) and blocks market discovery entirely.
+    // Keep proxy usage for CLOB/auth order routes only.
     const opts = { params, timeout: 10_000 };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(`${GAMMA_BASE}${path}`, opts);
     return resp.data;
   }
