@@ -121,12 +121,10 @@ class PolymarketConnector extends EventEmitter {
   }
 
   async _gammaGet(path, params = {}) {
+    // Gamma should be accessed directly. Routing it through the CLOB trading
+    // proxy can return 407 (proxy auth) and blocks market discovery entirely.
+    // Keep proxy usage for CLOB/auth order routes only.
     const opts = { params, timeout: 10_000 };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(`${GAMMA_BASE}${path}`, opts);
     return resp.data;
   }
@@ -137,11 +135,6 @@ class PolymarketConnector extends EventEmitter {
       params,
       timeout: 10_000,
     };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(`${this.clobUrl}${path}`, opts);
     return resp.data;
   }
@@ -160,11 +153,6 @@ class PolymarketConnector extends EventEmitter {
       headers,
       timeout: 10_000,
     };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(fullUrl, opts);
     return resp.data;
   }
@@ -415,11 +403,8 @@ class PolymarketConnector extends EventEmitter {
 
   _connectWs() {
     try {
-      const wsOptions = {};
-    if (process.env.POLY_PROXY_URL) {
-      wsOptions.agent = new HttpsProxyAgent(process.env.POLY_PROXY_URL);
-    }
-    this._ws = new WebSocket(CLOB_WS_URL, wsOptions);
+      // WS should stay direct. Proxy is reserved for order placement only.
+      this._ws = new WebSocket(CLOB_WS_URL);
     } catch (err) {
       console.error('[Polymarket WS] failed to create connection:', err.message);
       this._scheduleReconnect();
@@ -446,7 +431,18 @@ class PolymarketConnector extends EventEmitter {
 
     this._ws.on('message', (raw) => {
       try {
-        const msgs = JSON.parse(raw.toString());
+        const text = raw.toString().trim();
+        if (!text) return;
+        if (text[0] !== '{' && text[0] !== '[') {
+          // CLOB occasionally sends plain-text protocol errors (e.g. "INVALID OPERATION").
+          // These are not JSON payloads and should not crash/log-spam the WS handler.
+          if (!this._lastNonJsonWsLogAt || (Date.now() - this._lastNonJsonWsLogAt) > 10_000) {
+            this._lastNonJsonWsLogAt = Date.now();
+            console.warn(`[Polymarket WS] non-JSON message ignored: ${text.slice(0, 120)}`);
+          }
+          return;
+        }
+        const msgs = JSON.parse(text);
         // Messages can be a single object or an array
         const arr = Array.isArray(msgs) ? msgs : [msgs];
         for (const msg of arr) {
@@ -708,6 +704,13 @@ class PolymarketConnector extends EventEmitter {
     if (this._pingTimer) clearInterval(this._pingTimer);
     this._pingTimer = setInterval(() => {
       if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+        const silentForMs = Date.now() - this._lastPongAt;
+        if (this._lastPongAt > 0 && silentForMs > 45_000) {
+          console.warn(`[Polymarket WS] pong timeout (${silentForMs}ms) — forcing reconnect`);
+          // terminate() is safer than close() on half-open sockets.
+          this._ws.terminate();
+          return;
+        }
         this._ws.ping();
       }
     }, 15_000);
@@ -724,6 +727,7 @@ class PolymarketConnector extends EventEmitter {
 
   _scheduleReconnect() {
     if (this._reconnectTimer) return;
+    if (this._subscribedAssets.size === 0) return;
 
     console.log(`[Polymarket WS] reconnecting in ${this._reconnectDelay}ms...`);
     this._reconnectTimer = setTimeout(() => {
