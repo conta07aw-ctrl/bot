@@ -121,12 +121,10 @@ class PolymarketConnector extends EventEmitter {
   }
 
   async _gammaGet(path, params = {}) {
+    // Gamma should be accessed directly. Routing it through the CLOB trading
+    // proxy can return 407 (proxy auth) and blocks market discovery entirely.
+    // Keep proxy usage for CLOB/auth order routes only.
     const opts = { params, timeout: 10_000 };
-    const agent = this._getProxyAgent();
-    if (agent) {
-      opts.httpsAgent = agent;
-      opts.proxy = false;
-    }
     const resp = await axios.get(`${GAMMA_BASE}${path}`, opts);
     return resp.data;
   }
@@ -708,6 +706,13 @@ class PolymarketConnector extends EventEmitter {
     if (this._pingTimer) clearInterval(this._pingTimer);
     this._pingTimer = setInterval(() => {
       if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+        const silentForMs = Date.now() - this._lastPongAt;
+        if (this._lastPongAt > 0 && silentForMs > 45_000) {
+          console.warn(`[Polymarket WS] pong timeout (${silentForMs}ms) — forcing reconnect`);
+          // terminate() is safer than close() on half-open sockets.
+          this._ws.terminate();
+          return;
+        }
         this._ws.ping();
       }
     }, 15_000);
@@ -724,6 +729,7 @@ class PolymarketConnector extends EventEmitter {
 
   _scheduleReconnect() {
     if (this._reconnectTimer) return;
+    if (this._subscribedAssets.size === 0) return;
 
     console.log(`[Polymarket WS] reconnecting in ${this._reconnectDelay}ms...`);
     this._reconnectTimer = setTimeout(() => {
