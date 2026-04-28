@@ -1,0 +1,31 @@
+{
+  "name": "sarbccode",
+  "version": "0.1.0",
+  "description": "Simultaneous Asymmetric aRBitrage engine — Kalshi × Polymarket",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "dev": "node src/index.js",
+    "start": "node src/index.js",
+    "dashboard": "next dev --dir frontend",
+    "lint": "eslint src/ --ext .js"
+  },
+  "dependencies": {
+    "@polymarket/builder-relayer-client": "^0.0.8",
+    "@polymarket/clob-client-v2": "^1.0.2",
+    "axios": "^1.7.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^16.4.0",
+    "ethers": "^6.16.0",
+    "express": "^4.19.0",
+    "https-proxy-agent": "^7.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "socket.io": "^4.7.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
+}

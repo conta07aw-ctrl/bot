@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SARBCCODE Dashboard</title>
+  <style>
+    :root {
+      --bg-primary: #0d1117;
+      --bg-card: #161b22;
+      --bg-card-hover: #1c2333;
+      --bg-input: #0d1117;
+      --border: #30363d;
+      --text-primary: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted: #484f58;
+      --green: #3fb950;
+      --green-dim: #238636;
+      --red: #f85149;
+      --red-dim: #da3633;
+      --blue: #58a6ff;
+      --orange: #d29922;
+      --purple: #bc8cff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+    .header h1 span { color: var(--blue); }
+    .header-right { display: flex; gap: 16px; align-items: center; font-size: 13px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+    .status-dot.connected { background: var(--green); }
+    .status-dot.disconnected { background: var(--red); }
+    .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); cursor: pointer; font-size: 12px; font-weight: 500; transition: background 0.2s; }
+    .btn:hover { background: var(--bg-card-hover); }
+    .btn-primary { background: var(--green-dim); border-color: var(--green-dim); }
+    .btn-primary:hover { background: var(--green); color: #000; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+    /* Nav tabs */
+    .nav-tabs {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 0;
+      padding: 0 24px;
+    }
+    .nav-tab {
+      padding: 10px 20px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .nav-tab:hover { color: var(--text-primary); }
+    .nav-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+    /* Bankroll strip */
+    .bankroll-strip {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      gap: 32px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+    .bankroll-strip .item { display: flex; align-items: center; gap: 6px; }
+    .bankroll-strip .label { color: var(--text-secondary); }
+    .bankroll-strip .value { font-weight: 600; font-family: 'SF Mono', monospace; }
+    .value.positive { color: var(--green); }
+    .value.negative { color: var(--red); }
+    .value.mode-dry { color: var(--orange); }
+    .value.mode-live { color: var(--green); }
+
+    /* Main content */
+    .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Section */
+    .section-title { font-size: 14px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+
+    /* Price grid */
+    .price-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .price-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; transition: border-color 0.2s; }
+    .price-card:hover { border-color: var(--blue); }
+    .price-card .asset-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .price-card .asset-name { font-size: 16px; font-weight: 700; }
+    .price-card .asset-symbol { font-size: 12px; color: var(--text-muted); background: var(--bg-primary); padding: 2px 8px; border-radius: 4px; }
+    .price-card .platform-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; }
+    .price-card .platform-row + .platform-row { border-top: 1px solid var(--border); }
+    .platform-label { color: var(--text-secondary); font-weight: 500; }
+    .platform-label.kalshi { color: var(--blue); }
+    .platform-label.poly { color: var(--purple); }
+    .price-values { display: flex; gap: 12px; font-family: 'SF Mono', monospace; font-size: 13px; }
+    .price-up { color: var(--green); }
+    .price-down { color: var(--red); }
+    .volume-info { font-size: 11px; color: var(--text-muted); margin-top: 8px; text-align: right; }
+
+    /* Panels & Tables */
+    .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 24px; overflow: hidden; }
+    .panel-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .panel-header h2 { font-size: 14px; font-weight: 600; }
+    .panel-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .panel-badge.green { background: var(--green-dim); color: var(--green); }
+    .panel-badge.orange { background: rgba(210,153,34,0.2); color: var(--orange); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 8px 16px; color: var(--text-secondary); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--border); }
+    td { padding: 8px 16px; border-bottom: 1px solid var(--border); font-family: 'SF Mono', monospace; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover { background: var(--bg-card-hover); }
+    .empty-state { padding: 32px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .tag.buy { background: rgba(63,185,80,0.15); color: var(--green); }
+    .tag.sell { background: rgba(248,81,73,0.15); color: var(--red); }
+    .tag.dry-run { background: rgba(210,153,34,0.15); color: var(--orange); }
+    .tag.filled { background: rgba(63,185,80,0.15); color: var(--green); }
+    .tag.partial { background: rgba(210,153,34,0.15); color: var(--orange); }
+    .tag.failed { background: rgba(248,81,73,0.15); color: var(--red); }
+
+    /* Settings forms */
+    .settings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text-primary); font-size: 13px; font-family: 'SF Mono', monospace;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--blue); }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .form-actions { margin-top: 16px; display: flex; gap: 8px; }
+    .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .key-status { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 8px; }
+    .key-status.ok { background: rgba(63,185,80,0.15); color: var(--green); }
+    .key-status.missing { background: rgba(248,81,73,0.15); color: var(--red); }
+
+    /* Filter toggle */
+    .filter-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .filter-row:last-child { border-bottom: none; }
+    .filter-row .asset { font-weight: 600; width: 50px; }
+    .filter-row input[type="number"] { width: 80px; padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px; text-align: center; }
+    .filter-row input[type="checkbox"] { accent-color: var(--green); }
+    .filter-label { font-size: 12px; color: var(--text-secondary); width: 100px; }
+
+    /* Login modal */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 32px; width: 360px; max-width: 90vw;
+    }
+    .modal h2 { font-size: 20px; margin-bottom: 4px; }
+    .modal .subtitle { color: var(--text-secondary); font-size: 13px; margin-bottom: 24px; }
+    .modal .error { color: var(--red); font-size: 12px; margin-bottom: 12px; display: none; }
+    .modal .toggle-link { font-size: 12px; color: var(--blue); cursor: pointer; text-align: center; margin-top: 16px; }
+
+    .footer { text-align: center; padding: 24px; color: var(--text-muted); font-size: 12px; }
+
+    @media (max-width: 768px) {
+      .price-grid { grid-template-columns: 1fr; }
+      .settings-grid { grid-template-columns: 1fr; }
+      .bankroll-strip { gap: 16px; }
+      .header { flex-direction: column; gap: 8px; }
+      .nav-tabs { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Login Modal -->
+  <div class="modal-overlay" id="login-modal">
+    <div class="modal">
+      <h2 id="auth-title">Login</h2>
+      <p class="subtitle" id="auth-subtitle">Enter your credentials to access the dashboard</p>
+      <div class="error" id="auth-error"></div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="auth-username" placeholder="username" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="auth-password" placeholder="password (min 6 chars)" autocomplete="current-password">
+      </div>
+      <div class="form-group" id="invite-group" style="display:none">
+        <label>Invite Code</label>
+        <input type="text" id="auth-invite" placeholder="XXXXXXXXXXXXXXXX" autocomplete="off" style="text-transform:uppercase">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" style="width:100%;padding:10px" id="auth-submit">Login</button>
+      </div>
+      <div class="toggle-link" id="auth-toggle">Don't have an account? Register</div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="header">
+    <h1>SARBC<span>CODE</span></h1>
+    <div class="header-right">
+      <div id="ws-status">
+        <span class="status-dot disconnected" id="ws-dot"></span>
+        <span id="ws-text">Connecting...</span>
+      </div>
+      <span id="poll-time" style="color: var(--text-muted)">--</span>
+      <span id="user-display" style="color: var(--blue); font-weight: 500"></span>
+      <button class="btn btn-sm" id="logout-btn" style="display:none">Logout</button>
+    </div>
+  </header>
+
+  <!-- Nav Tabs -->
+  <div class="nav-tabs">
+    <div class="nav-tab active" data-tab="dashboard">Dashboard</div>
+    <div class="nav-tab" data-tab="settings">Settings</div>
+    <div class="nav-tab" data-tab="keys">API Keys</div>
+  </div>
+
+  <!-- Status strip -->
+  <div class="bankroll-strip">
+    <div class="item"><span class="label">Kalshi</span><span class="value" id="bal-kalshi">$--</span></div>
+    <div class="item"><span class="label">Polymarket</span><span class="value" id="bal-poly">$--</span></div>
+    <div class="item"><span class="label">P&L</span><span class="value" id="bk-pnl">$0</span></div>
+    <div class="item"><span class="label">Trades</span><span class="value" id="bk-trades">0</span></div>
+    <div class="item"><span class="label">Mode</span><span class="value mode-dry" id="bk-mode">--</span></div>
+  </div>
+
+  <div class="main">
+
+    <!-- TAB: Dashboard -->
+    <div class="tab-content active" id="tab-dashboard">
+      <div class="section-title">Live Prices (15-min markets)</div>
+      <div class="price-grid" id="price-grid"></div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Arbitrage Opportunities</h2>
+          <span class="panel-badge orange" id="opp-count">0 signals</span>
+        </div>
+        <div id="opp-table-wrap">
+          <div class="empty-state">Scanning for cross-platform arbitrage...</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Trade History</h2>
+          <span class="panel-badge green" id="trade-count">0 trades</span>
+        </div>
+        <div id="trade-table-wrap">
+          <div class="empty-state">No trades executed yet</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Settings -->
+    <div class="tab-content" id="tab-settings">
+      <!-- Per-asset filters -->
+      <div class="panel" style="margin-bottom:24px">
+        <div class="panel-header"><h2>Asset Filters (per asset)</h2></div>
+        <div style="padding: 16px">
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Configure each asset individually — enable/disable, entry size, min ROI, and price divergence:</p>
+          <div id="filters-form"></div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="save-filters-btn">Save Filters</button>
+            <span id="filters-msg" style="font-size:12px;color:var(--green);display:none">Saved!</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Global settings -->
+      <div class="settings-grid">
+        <div class="panel">
+          <div class="panel-header"><h2>Trade Mode</h2></div>
+          <div style="padding: 16px">
+            <div class="form-group">
+              <label>Mode</label>
+              <select id="set-tradeMode">
+                <option value="dry-run">dry-run (simulation, no real orders)</option>
+                <option value="live">live (real money, real orders)</option>
+              </select>
+              <div class="form-hint">Start with dry-run to test. Switch to live only when ready.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h2>Capital Protection</h2></div>
+          <div style="padding: 16px">
+            <div class="form-group">
+              <label>Stop Kalshi at ($)</label>
+              <input type="number" id="set-kalshiStopAt" step="10" min="0">
+              <div class="form-hint">Stop trading if Kalshi balance drops below this. 0 = no stop.</div>
+            </div>
+            <div class="form-group">
+              <label>Stop Polymarket at ($)</label>
+              <input type="number" id="set-polyStopAt" step="10" min="0">
+              <div class="form-hint">Stop trading if Polymarket balance drops below this. 0 = no stop.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telegram Notifications -->
+      <div class="panel" style="margin-top:24px">
+        <div class="panel-header"><h2>Telegram Notifications</h2></div>
+        <div style="padding: 16px">
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">Receive trade, hedge, and balance alerts on Telegram. Create a bot via @BotFather, then get your Chat ID.</p>
+          <div class="form-group" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="set-telegramEnabled" style="accent-color:var(--green);width:18px;height:18px">
+            <label style="margin-bottom:0;cursor:pointer" for="set-telegramEnabled">Enable Telegram notifications</label>
+          </div>
+          <div class="form-group">
+            <label>Bot Token</label>
+            <input type="password" id="set-telegramBotToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+            <div class="form-hint">Get from @BotFather on Telegram</div>
+          </div>
+          <div class="form-group">
+            <label>Chat ID</label>
+            <input type="text" id="set-telegramChatId" placeholder="123456789">
+            <div class="form-hint">Send /start to your bot, then check https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WebSocket Live Check toggle (admin only, global) -->
+      <div class="panel" style="margin-top:24px; display:none" id="livecheck-panel">
+        <div class="panel-header">
+          <h2>WebSocket Live Check (Global)</h2>
+          <span class="key-status" id="livecheck-status">--</span>
+        </div>
+        <div style="padding: 16px">
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">When enabled, the dispatcher reads top-of-book from the in-memory WebSocket cache (~20ms) instead of calling REST endpoints (~150-1800ms). Falls back to REST automatically if the WS cache is stale or empty. This setting applies to all users.</p>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="toggle-livecheck-btn">Enable</button>
+            <span id="livecheck-msg" style="font-size:12px;color:var(--green);display:none">Saved!</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="margin-top:12px">
+        <button class="btn btn-primary" id="save-settings-btn">Save Settings</button>
+        <span id="settings-msg" style="font-size:12px;color:var(--green);display:none">Saved!</span>
+      </div>
+    </div>
+
+    <!-- TAB: API Keys -->
+    <div class="tab-content" id="tab-keys">
+      <div class="settings-grid">
+        <!-- Kalshi -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Kalshi API Keys</h2>
+            <span class="key-status" id="kalshi-key-status">--</span>
+          </div>
+          <div style="padding: 16px">
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" id="key-kalshiApiKey" placeholder="Your Kalshi API key">
+            </div>
+            <div class="form-group">
+              <label>Private Key (PEM content)</label>
+              <textarea id="key-kalshiPrivateKeyPem" placeholder="Paste your RSA private key PEM content here"></textarea>
+              <div class="form-hint">Paste the full PEM content (-----BEGIN PRIVATE KEY----- ... -----END PRIVATE KEY-----)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Polymarket -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Polymarket API Keys</h2>
+            <span class="key-status" id="poly-key-status">--</span>
+          </div>
+          <div style="padding: 16px">
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" id="key-polyApiKey" placeholder="Builder Code API Key">
+            </div>
+            <div class="form-group">
+              <label>API Secret</label>
+              <input type="password" id="key-polyApiSecret" placeholder="Builder Code Secret">
+            </div>
+            <div class="form-group">
+              <label>Passphrase</label>
+              <input type="password" id="key-polyPassphrase" placeholder="Builder Code Passphrase">
+            </div>
+            <div class="form-group">
+              <label>Signer Private Key</label>
+              <input type="password" id="key-polyPrivateKey" placeholder="0x... (signer wallet, signs orders)">
+              <div class="form-hint">Private key of the signer wallet (no funds here)</div>
+            </div>
+            <div class="form-group">
+              <label>Proxy Wallet Address</label>
+              <input type="text" id="key-polyFunderAddress" placeholder="0x... (proxy wallet, holds USDC)">
+              <div class="form-hint">Polymarket-generated proxy wallet where your funds are</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:8px">
+        <button class="btn btn-primary" id="save-keys-btn">Save All Keys (Encrypted)</button>
+        <span id="keys-msg" style="font-size:12px;color:var(--green);display:none">Saved &amp; encrypted!</span>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">SARBCCODE &mdash; Simultaneous Asymmetric Arbitrage Engine</footer>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/app.js?v=c4"></script>
+</body>
+</html>
