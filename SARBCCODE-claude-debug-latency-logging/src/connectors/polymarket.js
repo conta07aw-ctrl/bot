@@ -162,7 +162,7 @@ class PolymarketConnector extends EventEmitter {
     try {
       const sigType = this.funderAddress
         && this.funderAddress.toLowerCase() !== this.wallet.address.toLowerCase()
-        ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
+        ? SignatureTypeV2.GNOSIS_SAFE : SignatureTypeV2.EOA;
       const data = await this._clobAuthGet('/balance-allowance', {
         asset_type: 'CONDITIONAL',
         token_id: tokenId,
@@ -291,7 +291,7 @@ class PolymarketConnector extends EventEmitter {
     const signerAddr = this.viemWallet.account.address.toLowerCase();
     const proxyAddr = (this.funderAddress || '').toLowerCase();
     const useProxy = proxyAddr && proxyAddr !== signerAddr;
-    const signatureType = useProxy ? SignatureTypeV2.POLY_PROXY : SignatureTypeV2.EOA;
+    const signatureType = useProxy ? SignatureTypeV2.GNOSIS_SAFE : SignatureTypeV2.EOA;
     const clientConfig = {
       host: this.clobUrl,
       chain: Chain.POLYGON,
