@@ -723,19 +723,18 @@ class KalshiConnector extends EventEmitter {
       eventGroups.get(et).push(m);
     }
 
-    // Find the nearest future event (closest expiration)
-    // The API already filters status=open, so all returned markets are active.
-    // We only skip events where ALL markets have prices pinned at 0.99+ or 0.01-
-    // (truly resolved), NOT events with just a few extreme prices.
+    // Find the nearest future event (closest trade-close time).
+    // For Kalshi 15-minute markets, close_time is the actual trading window end.
+    // expiration_time may be a later settlement date and should not be used
+    // to decide whether the round is still live.
     const now = new Date();
     let nearestEvent = null;
     let nearestExpiry = null;
 
     for (const [eventTicker, markets] of eventGroups) {
-      const expStr = markets[0]?.expiration_time || markets[0]?.close_time || '';
-      if (!expStr) continue;
-
-      const expiry = new Date(expStr);
+      const closeStr = markets[0]?.close_time || markets[0]?.expiration_time || '';
+      if (!closeStr) continue;
+      const expiry = new Date(closeStr);
       if (expiry <= now) continue;
 
       // Only skip if ALL markets with quotes are pinned at extreme prices (truly settled)
@@ -764,6 +763,9 @@ class KalshiConnector extends EventEmitter {
       console.log(`[Kalshi] ${asset.symbol} — no active events found (${eventGroups.size} events checked, all settled or expired)`);
       return [];
     }
+
+    const chosenExpiry = new Date(nearestEvent.markets[0].close_time || nearestEvent.markets[0].expiration_time || '');
+    console.log(`[Kalshi] ${asset.symbol} selected event ${nearestEvent.eventTicker} closing at ${chosenExpiry.toISOString()}`);
 
     const normalized = nearestEvent.markets.map((m) => this._normalize(m, asset));
 
