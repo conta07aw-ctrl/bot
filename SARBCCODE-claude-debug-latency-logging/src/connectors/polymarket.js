@@ -946,15 +946,22 @@ class PolymarketConnector extends EventEmitter {
             owner: this.apiKey,
             orderType,
           };
-      if (payload?.order) {
-        const orderWire = payload.order;
+      const orderWire = payload?.order?.order || payload?.order || null;
+      if (orderWire) {
         // Normalize wire fields across SDK variants (camelCase / snake_case).
         orderWire.signatureType = wireSigType;
+        orderWire.signature_type = wireSigType;
         orderWire.taker = orderWire.taker || '0x0000000000000000000000000000000000000000';
         orderWire.expiration = String(orderWire.expiration ?? 0);
         orderWire.timestamp = String(orderWire.timestamp ?? Date.now());
         payload.postOnly = false;
         payload.deferExec = false;
+        payload.orderType = orderType;
+        if (payload.order && payload.order.order) {
+          payload.order.order = orderWire;
+        } else {
+          payload.order = orderWire;
+        }
       }
 
       const path = '/order';
@@ -985,7 +992,8 @@ class PolymarketConnector extends EventEmitter {
         orderTypeEnum,
       );
       const postLatencyMs = Date.now() - t0;
-      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${payload?.order?.signatureType})`);
+      const logWire = payload?.order?.order || payload?.order;
+      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${logWire?.signatureType}, maker=${logWire?.maker || 'n/a'}, signer=${logWire?.signer || 'n/a'})`);
       const data = resp?.data || resp;
 
       // CLOB returns 200 with {error: "..."} on validation failures
