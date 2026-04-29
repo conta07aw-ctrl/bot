@@ -946,8 +946,15 @@ class PolymarketConnector extends EventEmitter {
             owner: this.apiKey,
             orderType,
           };
-      if (payload?.order && wireSigType === SignatureTypeV2.GNOSIS_SAFE) {
-        payload.order.signatureType = SignatureTypeV2.GNOSIS_SAFE;
+      if (payload?.order) {
+        const orderWire = payload.order;
+        // Normalize wire fields across SDK variants (camelCase / snake_case).
+        orderWire.signatureType = wireSigType;
+        orderWire.taker = orderWire.taker || '0x0000000000000000000000000000000000000000';
+        orderWire.expiration = String(orderWire.expiration ?? 0);
+        orderWire.timestamp = String(orderWire.timestamp ?? Date.now());
+        payload.postOnly = false;
+        payload.deferExec = false;
       }
 
       const path = '/order';
