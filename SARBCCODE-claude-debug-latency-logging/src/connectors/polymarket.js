@@ -300,6 +300,25 @@ class PolymarketConnector extends EventEmitter {
       retryOnError: true,
     };
 
+    // Prefer already-saved API creds (dashboard) to avoid noisy create-api-key
+    // attempts on every boot. If stored creds exist, initialise client directly.
+    if (this.apiKey && this.apiSecret && this.passphrase) {
+      try {
+        this._clobClient = new ClobClient({
+          ...clientConfig,
+          creds: {
+            key: this.apiKey,
+            secret: this.apiSecret,
+            passphrase: this.passphrase,
+          },
+        });
+        console.log(`[Polymarket] ClobClient initialized with stored creds (apiKey: ${this.apiKey.slice(0, 8)}...)`);
+        return true;
+      } catch (storedErr) {
+        console.warn(`[Polymarket] stored creds init failed, falling back to derive: ${storedErr.message}`);
+      }
+    }
+
     try {
       const client = new ClobClient(clientConfig);
       const creds = await client.createOrDeriveApiKey();
@@ -899,6 +918,9 @@ class PolymarketConnector extends EventEmitter {
   }
 
   /**
+   * Post a single order through the official CLOB v2 SDK path.
+   * We enable proxy only around this call (buy/sell path) via env so
+   * discovery/WS/RPC traffic remains direct.
    * Post a single order through proxy-routed axios while keeping SDK signing.
    * This preserves geo-routing requirements (proxy only on order POST) and
    * enforces GNOSIS_SAFE wire signature type for browser-wallet funder flows.
@@ -927,11 +949,43 @@ class PolymarketConnector extends EventEmitter {
         size,
         side: orderSide,
       };
+      const signatureType = this.funderAddress
       const wireSigType = this.funderAddress
         && this.funderAddress.toLowerCase() !== this.wallet.address.toLowerCase()
         ? SignatureTypeV2.GNOSIS_SAFE
         : SignatureTypeV2.EOA;
 
+      const proxyUrl = process.env.POLY_PROXY_URL || '';
+      const prevHttpsProxy = process.env.HTTPS_PROXY;
+      const prevHttpProxy = process.env.HTTP_PROXY;
+      const prevNoProxy = process.env.NO_PROXY;
+      if (proxyUrl) {
+        process.env.HTTPS_PROXY = proxyUrl;
+        process.env.HTTP_PROXY = proxyUrl;
+        // keep local/private traffic direct if any
+        process.env.NO_PROXY = 'localhost,127.0.0.1';
+      }
+      const t0 = Date.now();
+      let resp;
+      try {
+        resp = await this._clobClient.createAndPostOrder(
+          orderToSign,
+          {
+            tickSize: '0.01',
+            signatureType,
+            funderAddress: signatureType === SignatureTypeV2.GNOSIS_SAFE ? this.funderAddress : undefined,
+          },
+          orderTypeEnum,
+        );
+      } finally {
+        if (proxyUrl) {
+          if (prevHttpsProxy === undefined) delete process.env.HTTPS_PROXY; else process.env.HTTPS_PROXY = prevHttpsProxy;
+          if (prevHttpProxy === undefined) delete process.env.HTTP_PROXY; else process.env.HTTP_PROXY = prevHttpProxy;
+          if (prevNoProxy === undefined) delete process.env.NO_PROXY; else process.env.NO_PROXY = prevNoProxy;
+        }
+      }
+      const postLatencyMs = Date.now() - t0;
+      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyUrl ? 'on' : 'off'}, sigType=${signatureType})`);
       const signedOrder = await this._clobClient.createOrder(orderToSign, {
         tickSize: '0.01',
         signatureType: wireSigType,
