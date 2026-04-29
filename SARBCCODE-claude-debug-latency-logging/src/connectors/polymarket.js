@@ -18,7 +18,6 @@ const {
   ClobClient,
   Chain,
   createL2Headers,
-  orderToJsonV2,
   OrderType,
   Side,
   SignatureTypeV2,
@@ -987,7 +986,11 @@ class PolymarketConnector extends EventEmitter {
       if (proxyAgent) axiosConfig.proxy = false;
 
       const t0 = Date.now();
-      const resp = await axios(axiosConfig);
+      const resp = await this._clobClient.createAndPostOrder(
+        orderToSign,
+        { tickSize: '0.01' },
+        orderTypeEnum,
+      );
       const postLatencyMs = Date.now() - t0;
       const logWire = payload?.order?.order || payload?.order;
       console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${logWire?.signatureType}, maker=${logWire?.maker || 'n/a'}, signer=${logWire?.signer || 'n/a'})`);
