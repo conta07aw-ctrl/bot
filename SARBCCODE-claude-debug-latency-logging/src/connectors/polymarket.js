@@ -938,7 +938,15 @@ class PolymarketConnector extends EventEmitter {
         signatureType: wireSigType,
         funderAddress: wireSigType === SignatureTypeV2.GNOSIS_SAFE ? this.funderAddress : undefined,
       });
-      const payload = orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false);
+      const payload = typeof orderToJsonV2 === 'function'
+        ? orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false)
+        : {
+            deferExec: false,
+            postOnly: false,
+            order: signedOrder,
+            owner: this.apiKey,
+            orderType,
+          };
       if (payload?.order && wireSigType === SignatureTypeV2.GNOSIS_SAFE) {
         payload.order.signatureType = SignatureTypeV2.GNOSIS_SAFE;
       }
