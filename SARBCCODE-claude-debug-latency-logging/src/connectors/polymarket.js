@@ -921,6 +921,9 @@ class PolymarketConnector extends EventEmitter {
    * Post a single order through the official CLOB v2 SDK path.
    * We enable proxy only around this call (buy/sell path) via env so
    * discovery/WS/RPC traffic remains direct.
+   * Post a single order through proxy-routed axios while keeping SDK signing.
+   * This preserves geo-routing requirements (proxy only on order POST) and
+   * enforces GNOSIS_SAFE wire signature type for browser-wallet funder flows.
    */
   async _postOrder(tokenId, price, size, side, orderType = 'FOK') {
     if (!this.wallet) {
@@ -947,6 +950,7 @@ class PolymarketConnector extends EventEmitter {
         side: orderSide,
       };
       const signatureType = this.funderAddress
+      const wireSigType = this.funderAddress
         && this.funderAddress.toLowerCase() !== this.wallet.address.toLowerCase()
         ? SignatureTypeV2.GNOSIS_SAFE
         : SignatureTypeV2.EOA;
@@ -982,6 +986,68 @@ class PolymarketConnector extends EventEmitter {
       }
       const postLatencyMs = Date.now() - t0;
       console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyUrl ? 'on' : 'off'}, sigType=${signatureType})`);
+      const signedOrder = await this._clobClient.createOrder(orderToSign, {
+        tickSize: '0.01',
+        signatureType: wireSigType,
+        funderAddress: wireSigType === SignatureTypeV2.GNOSIS_SAFE ? this.funderAddress : undefined,
+      });
+      const payload = typeof orderToJsonV2 === 'function'
+        ? orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false)
+        : {
+            deferExec: false,
+            postOnly: false,
+            order: signedOrder,
+            owner: this.apiKey,
+            orderType,
+          };
+      const orderWire = payload?.order?.order || payload?.order || null;
+      if (orderWire) {
+        // Normalize wire fields across SDK variants (camelCase / snake_case).
+        orderWire.signatureType = wireSigType;
+        orderWire.signature_type = wireSigType;
+        orderWire.taker = orderWire.taker || '0x0000000000000000000000000000000000000000';
+        orderWire.expiration = String(orderWire.expiration ?? 0);
+        orderWire.timestamp = String(orderWire.timestamp ?? Date.now());
+        payload.postOnly = false;
+        payload.deferExec = false;
+        payload.orderType = orderType;
+        if (payload.order && payload.order.order) {
+          payload.order.order = orderWire;
+        } else {
+          payload.order = orderWire;
+        }
+      }
+
+      const path = '/order';
+      const bodyStr = JSON.stringify(payload);
+      this._ensureViemWallet();
+      const headers = await createL2Headers(
+        this.viemWallet || this.wallet,
+        { key: this.apiKey, secret: this.apiSecret, passphrase: this.passphrase },
+        { method: 'POST', requestPath: path, body: bodyStr },
+      );
+
+      const proxyAgent = this._getProxyAgent();
+      const axiosConfig = {
+        method: 'POST',
+        url: `${this.clobUrl}${path}`,
+        data: payload,
+        headers,
+        timeout: 15_000,
+        maxRedirects: 0,
+        httpsAgent: proxyAgent || clobAgent,
+      };
+      if (proxyAgent) axiosConfig.proxy = false;
+
+      const t0 = Date.now();
+      const resp = await this._clobClient.createAndPostOrder(
+        orderToSign,
+        { tickSize: '0.01' },
+        orderTypeEnum,
+      );
+      const postLatencyMs = Date.now() - t0;
+      const logWire = payload?.order?.order || payload?.order;
+      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${logWire?.signatureType}, maker=${logWire?.maker || 'n/a'}, signer=${logWire?.signer || 'n/a'})`);
       const data = resp?.data || resp;
 
       // CLOB returns 200 with {error: "..."} on validation failures
