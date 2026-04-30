@@ -162,7 +162,7 @@ class PolymarketConnector extends EventEmitter {
     try {
       const sigType = this.funderAddress
         && this.funderAddress.toLowerCase() !== this.wallet.address.toLowerCase()
-        ? SignatureTypeV2.GNOSIS_SAFE : SignatureTypeV2.EOA;
+        ? SignatureTypeV2.POLY_GNOSIS_SAFE : SignatureTypeV2.EOA;
       const data = await this._clobAuthGet('/balance-allowance', {
         asset_type: 'CONDITIONAL',
         token_id: tokenId,
@@ -288,13 +288,14 @@ class PolymarketConnector extends EventEmitter {
       return false;
     }
 
-    const signatureType = SignatureTypeV2.EOA;
+    const signatureType = this.funderAddress && this.funderAddress.toLowerCase() !== this.viemWallet.account.address.toLowerCase()
+      ? SignatureTypeV2.POLY_GNOSIS_SAFE : SignatureTypeV2.EOA;
     const clientConfig = {
       host: this.clobUrl,
       chain: Chain.POLYGON,
       signer: this.viemWallet,
       signatureType,
-      funderAddress: undefined,
+      funderAddress: this.funderAddress || undefined,
       retryOnError: true,
     };
 
@@ -942,7 +943,8 @@ class PolymarketConnector extends EventEmitter {
             : OrderType.GTC;
       const orderSide = side === 'BUY' ? Side.BUY : Side.SELL;
 
-      const wireSigType = SignatureTypeV2.EOA;
+      const wireSigType = this.funderAddress && this.funderAddress.toLowerCase() !== this.viemWallet.account.address.toLowerCase()
+        ? SignatureTypeV2.POLY_GNOSIS_SAFE : SignatureTypeV2.EOA;
 
       const orderToSign = {
         tokenID: tokenId,
@@ -955,7 +957,7 @@ class PolymarketConnector extends EventEmitter {
       const signedOrder = await this._clobClient.createOrder(orderToSign, {
         tickSize: '0.01',
         signatureType: wireSigType,
-        funderAddress: undefined,
+        funderAddress: this.funderAddress || undefined,
       });
 
       const payload = typeof orderToJsonV2 === 'function'
