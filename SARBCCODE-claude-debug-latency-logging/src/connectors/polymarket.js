@@ -973,7 +973,6 @@ class PolymarketConnector extends EventEmitter {
 
       const path = '/order';
       const bodyStr = JSON.stringify(payload);
-      this._ensureViemWallet();
       const headers = await createL2Headers(
         this.viemWallet || this.wallet,
         { key: this.apiKey, secret: this.apiSecret, passphrase: this.passphrase },
@@ -993,7 +992,11 @@ class PolymarketConnector extends EventEmitter {
       if (proxyAgent) axiosConfig.proxy = false;
 
       const t0 = Date.now();
-      const resp = await axios(axiosConfig);
+      const resp = await this._clobClient.createAndPostOrder(
+        orderToSign,
+        { tickSize: '0.01' },
+        orderTypeEnum,
+      );
       const postLatencyMs = Date.now() - t0;
       console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${wireSigType}, maker=${signedOrder.maker || 'n/a'})`);
       const data = resp.data;
