@@ -921,9 +921,6 @@ class PolymarketConnector extends EventEmitter {
    * Post a single order through the official CLOB v2 SDK path.
    * We enable proxy only around this call (buy/sell path) via env so
    * discovery/WS/RPC traffic remains direct.
-   * Post a single order through proxy-routed axios while keeping SDK signing.
-   * This preserves geo-routing requirements (proxy only on order POST) and
-   * enforces GNOSIS_SAFE wire signature type for browser-wallet funder flows.
    */
   async _postOrder(tokenId, price, size, side, orderType = 'FOK') {
     if (!this.wallet) {
@@ -935,62 +932,36 @@ class PolymarketConnector extends EventEmitter {
     this._lastOrderError = null;
 
     try {
-      const orderTypeEnum = orderType === 'FOK'
-        ? OrderType.FOK
-        : orderType === 'FAK'
-          ? OrderType.FAK
-          : orderType === 'GTD'
-            ? OrderType.GTD
+      const { orderToJsonV2 } = require('@polymarket/clob-client-v2');
+
+      const orderTypeEnum = orderType === 'FOK' ? OrderType.FOK
+        : orderType === 'FAK' ? OrderType.FAK
+          : orderType === 'GTD' ? OrderType.GTD
             : OrderType.GTC;
       const orderSide = side === 'BUY' ? Side.BUY : Side.SELL;
+
+      const signerAddr = this.wallet.address.toLowerCase();
+      const funderAddr = (this.funderAddress || '').toLowerCase();
+      const useProxyWallet = funderAddr && funderAddr !== signerAddr;
+      const wireSigType = useProxyWallet
+        ? SignatureTypeV2.GNOSIS_SAFE
+        : SignatureTypeV2.EOA;
+
       const orderToSign = {
         tokenID: tokenId,
         price,
         size,
         side: orderSide,
       };
-      const signatureType = this.funderAddress
-      const wireSigType = this.funderAddress
-        && this.funderAddress.toLowerCase() !== this.wallet.address.toLowerCase()
-        ? SignatureTypeV2.GNOSIS_SAFE
-        : SignatureTypeV2.EOA;
 
-      const proxyUrl = process.env.POLY_PROXY_URL || '';
-      const prevHttpsProxy = process.env.HTTPS_PROXY;
-      const prevHttpProxy = process.env.HTTP_PROXY;
-      const prevNoProxy = process.env.NO_PROXY;
-      if (proxyUrl) {
-        process.env.HTTPS_PROXY = proxyUrl;
-        process.env.HTTP_PROXY = proxyUrl;
-        // keep local/private traffic direct if any
-        process.env.NO_PROXY = 'localhost,127.0.0.1';
-      }
-      const t0 = Date.now();
-      let resp;
-      try {
-        resp = await this._clobClient.createAndPostOrder(
-          orderToSign,
-          {
-            tickSize: '0.01',
-            signatureType,
-            funderAddress: signatureType === SignatureTypeV2.GNOSIS_SAFE ? this.funderAddress : undefined,
-          },
-          orderTypeEnum,
-        );
-      } finally {
-        if (proxyUrl) {
-          if (prevHttpsProxy === undefined) delete process.env.HTTPS_PROXY; else process.env.HTTPS_PROXY = prevHttpsProxy;
-          if (prevHttpProxy === undefined) delete process.env.HTTP_PROXY; else process.env.HTTP_PROXY = prevHttpProxy;
-          if (prevNoProxy === undefined) delete process.env.NO_PROXY; else process.env.NO_PROXY = prevNoProxy;
-        }
-      }
-      const postLatencyMs = Date.now() - t0;
-      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyUrl ? 'on' : 'off'}, sigType=${signatureType})`);
+      this._ensureViemWallet();
       const signedOrder = await this._clobClient.createOrder(orderToSign, {
         tickSize: '0.01',
         signatureType: wireSigType,
-        funderAddress: wireSigType === SignatureTypeV2.GNOSIS_SAFE ? this.funderAddress : undefined,
+        funderAddress: wireSigType === SignatureTypeV2.GNOSIS_SAFE
+          ? this.funderAddress : undefined,
       });
+
       const payload = typeof orderToJsonV2 === 'function'
         ? orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false)
         : {
@@ -1000,27 +971,9 @@ class PolymarketConnector extends EventEmitter {
             owner: this.apiKey,
             orderType,
           };
-      const orderWire = payload?.order?.order || payload?.order || null;
-      if (orderWire) {
-        // Normalize wire fields across SDK variants (camelCase / snake_case).
-        orderWire.signatureType = wireSigType;
-        orderWire.signature_type = wireSigType;
-        orderWire.taker = orderWire.taker || '0x0000000000000000000000000000000000000000';
-        orderWire.expiration = String(orderWire.expiration ?? 0);
-        orderWire.timestamp = String(orderWire.timestamp ?? Date.now());
-        payload.postOnly = false;
-        payload.deferExec = false;
-        payload.orderType = orderType;
-        if (payload.order && payload.order.order) {
-          payload.order.order = orderWire;
-        } else {
-          payload.order = orderWire;
-        }
-      }
 
       const path = '/order';
       const bodyStr = JSON.stringify(payload);
-      this._ensureViemWallet();
       const headers = await createL2Headers(
         this.viemWallet || this.wallet,
         { key: this.apiKey, secret: this.apiSecret, passphrase: this.passphrase },
@@ -1046,9 +999,8 @@ class PolymarketConnector extends EventEmitter {
         orderTypeEnum,
       );
       const postLatencyMs = Date.now() - t0;
-      const logWire = payload?.order?.order || payload?.order;
-      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${logWire?.signatureType}, maker=${logWire?.maker || 'n/a'}, signer=${logWire?.signer || 'n/a'})`);
-      const data = resp?.data || resp;
+      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${wireSigType}, maker=${signedOrder.maker || 'n/a'})`);
+      const data = resp.data;
 
       // CLOB returns 200 with {error: "..."} on validation failures
       if (data && data.error) {
@@ -1064,18 +1016,15 @@ class PolymarketConnector extends EventEmitter {
 
       return data;
     } catch (err) {
-      const status = err.response?.status || err.status || 'no-status';
+      const status = err.response?.status || 'no-status';
       const data = err.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : err.message;
-      const location = err.response?.headers?.location || err.response?.headers?.Location;
-      const reqUrl = err.config?.url || 'unknown';
-      const reqMethod = err.config?.method || 'unknown';
-      const errBody = err.response?.data?.error
-        || (typeof err.response?.data === 'string' ? err.response.data : null)
-        || err.message
-        || 'unknown';
-      this._lastOrderError = this._classifyOrderError(String(errBody), typeof status === 'number' ? status : null);
+      const location = err.response?.headers?.location || '';
+      this._lastOrderError = this._classifyOrderError(
+        err.response?.data?.error || err.message || 'unknown',
+        typeof status === 'number' ? status : null,
+      );
       console.error(`[Polymarket] order FAILED (HTTP ${status}): ${data}`);
-      console.error(`[Polymarket] order FAILED context: ${reqMethod.toUpperCase()} ${reqUrl}${location ? ` → Location: ${location}` : ''}`);
+      if (location) console.error(`[Polymarket] redirect location: ${location}`);
       return null;
     }
   }
