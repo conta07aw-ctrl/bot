@@ -958,8 +958,7 @@ class PolymarketConnector extends EventEmitter {
       const signedOrder = await this._clobClient.createOrder(orderToSign, {
         tickSize: '0.01',
         signatureType: wireSigType,
-        funderAddress: wireSigType === SignatureTypeV2.GNOSIS_SAFE
-          ? this.funderAddress : undefined,
+        funderAddress: useProxyWallet ? this.funderAddress : undefined,
       });
 
       const payload = typeof orderToJsonV2 === 'function'
@@ -1007,10 +1006,10 @@ class PolymarketConnector extends EventEmitter {
         const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
         this._lastOrderError = this._classifyOrderError(errStr, 200);
         if (errStr.toLowerCase().includes('fully filled') || errStr.toLowerCase().includes('not filled')) {
-          console.warn(`[Polymarket] FOK rejected (not enough liquidity at ${price}): ${errStr.slice(0, 200)}`);
+          console.warn(`[Polymarket] FOK rejeitado (liquidez insuficiente em ${price}): ${errStr.slice(0, 200)}`);
           return null;
         }
-        console.error(`[Polymarket] order FAILED (200 with error): ${errStr.slice(0, 300)}`);
+        console.error(`[Polymarket] order FAILED (200 com error): ${errStr.slice(0, 300)}`);
         return null;
       }
 

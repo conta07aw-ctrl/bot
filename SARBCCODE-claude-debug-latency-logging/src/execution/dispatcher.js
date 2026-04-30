@@ -81,7 +81,7 @@ class Dispatcher {
       // based on book age alone — a quiet book with no updates in 2s is still
       // the correct price if the WS is healthy.
       const polyOk = polyWs
-        && polyWs.bestAsk != null
+        && Array.isArray(polyWs.asks) && polyWs.asks.length > 0
         && polyWs.wsAlive;
       const kalshiOk = kalshiWs
         && (kalshiWs.yes.length > 0 || kalshiWs.no.length > 0)
