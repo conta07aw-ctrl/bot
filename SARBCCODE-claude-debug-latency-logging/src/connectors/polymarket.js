@@ -1039,7 +1039,6 @@ class PolymarketConnector extends EventEmitter {
     console.error(`[Polymarket] order FAILED (HTTP ${status}): ${data}`);
     return null;
   }
-}
 
   /**
    * Parse a CLOB error string into structured hedge-actionable metadata.
