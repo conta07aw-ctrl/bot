@@ -923,110 +923,102 @@ class PolymarketConnector extends EventEmitter {
    * discovery/WS/RPC traffic remains direct.
    */
   async _postOrder(tokenId, price, size, side, orderType = 'FOK') {
-    if (!this.wallet) {
-      console.error('[Polymarket] cannot place order — no wallet');
-      return null;
-    }
-
-    // Reset last-error so the hedge never reads stale data from a prior call.
-    this._lastOrderError = null;
-
-    try {
-      const { orderToJsonV2 } = require('@polymarket/clob-client-v2');
-
-      const orderTypeEnum = orderType === 'FOK' ? OrderType.FOK
-        : orderType === 'FAK' ? OrderType.FAK
-          : orderType === 'GTD' ? OrderType.GTD
-            : OrderType.GTC;
-      const orderSide = side === 'BUY' ? Side.BUY : Side.SELL;
-
-      const signerAddr = this.wallet.address.toLowerCase();
-      const funderAddr = (this.funderAddress || '').toLowerCase();
-      const useProxyWallet = funderAddr && funderAddr !== signerAddr;
-      const wireSigType = useProxyWallet
-        ? SignatureTypeV2.GNOSIS_SAFE
-        : SignatureTypeV2.EOA;
-
-      const orderToSign = {
-        tokenID: tokenId,
-        price,
-        size,
-        side: orderSide,
-      };
-
-      this._ensureViemWallet();
-      const signedOrder = await this._clobClient.createOrder(orderToSign, {
-        tickSize: '0.01',
-        signatureType: wireSigType,
-        funderAddress: useProxyWallet ? this.funderAddress : undefined,
-      });
-
-      const payload = typeof orderToJsonV2 === 'function'
-        ? orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false)
-        : {
-            deferExec: false,
-            postOnly: false,
-            order: signedOrder,
-            owner: this.apiKey,
-            orderType,
-          };
-
-      const path = '/order';
-      const bodyStr = JSON.stringify(payload);
-      const headers = await createL2Headers(
-        this.viemWallet || this.wallet,
-        { key: this.apiKey, secret: this.apiSecret, passphrase: this.passphrase },
-        { method: 'POST', requestPath: path, body: bodyStr },
-      );
-
-      const proxyAgent = this._getProxyAgent();
-      const axiosConfig = {
-        method: 'POST',
-        url: `${this.clobUrl}${path}`,
-        data: payload,
-        headers,
-        timeout: 15_000,
-        maxRedirects: 0,
-        httpsAgent: proxyAgent || clobAgent,
-      };
-      if (proxyAgent) axiosConfig.proxy = false;
-
-      const t0 = Date.now();
-      const resp = await this._clobClient.createAndPostOrder(
-        orderToSign,
-        { tickSize: '0.01' },
-        orderTypeEnum,
-      );
-      const postLatencyMs = Date.now() - t0;
-      console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${wireSigType}, maker=${signedOrder.maker || 'n/a'})`);
-      const data = resp.data;
-
-      // CLOB returns 200 with {error: "..."} on validation failures
-      if (data && data.error) {
-        const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
-        this._lastOrderError = this._classifyOrderError(errStr, 200);
-        if (errStr.toLowerCase().includes('fully filled') || errStr.toLowerCase().includes('not filled')) {
-          console.warn(`[Polymarket] FOK rejeitado (liquidez insuficiente em ${price}): ${errStr.slice(0, 200)}`);
-          return null;
-        }
-        console.error(`[Polymarket] order FAILED (200 com error): ${errStr.slice(0, 300)}`);
-        return null;
-      }
-
-      return data;
-    } catch (err) {
-      const status = err.response?.status || 'no-status';
-      const data = err.response?.data ? JSON.stringify(err.response.data).slice(0, 300) : err.message;
-      const location = err.response?.headers?.location || '';
-      this._lastOrderError = this._classifyOrderError(
-        err.response?.data?.error || err.message || 'unknown',
-        typeof status === 'number' ? status : null,
-      );
-      console.error(`[Polymarket] order FAILED (HTTP ${status}): ${data}`);
-      if (location) console.error(`[Polymarket] redirect location: ${location}`);
-      return null;
-    }
+  if (!this.wallet) {
+    console.error('[Polymarket] cannot place order — no wallet');
+    return null;
   }
+
+  this._lastOrderError = null;
+
+  try {
+    const { orderToJsonV2 } = require('@polymarket/clob-client-v2');
+
+    const orderTypeEnum = orderType === 'FOK' ? OrderType.FOK
+      : orderType === 'FAK' ? OrderType.FAK
+        : orderType === 'GTD' ? OrderType.GTD
+          : OrderType.GTC;
+    const orderSide = side === 'BUY' ? Side.BUY : Side.SELL;
+
+    const signerAddr = this.wallet.address.toLowerCase();
+    const funderAddr = (this.funderAddress || '').toLowerCase();
+    const useProxyWallet = funderAddr && funderAddr !== signerAddr;
+    const wireSigType = useProxyWallet
+      ? SignatureTypeV2.GNOSIS_SAFE
+      : SignatureTypeV2.EOA;
+
+    const orderToSign = { tokenID: tokenId, price, size, side: orderSide };
+
+    this._ensureViemWallet();
+
+    // Assina localmente via SDK (sem rede)
+    const signedOrder = await this._clobClient.createOrder(orderToSign, {
+      tickSize: '0.01',
+      signatureType: wireSigType,
+      funderAddress: useProxyWallet ? this.funderAddress : undefined,
+    });
+
+    // Monta payload
+    const payload = typeof orderToJsonV2 === 'function'
+      ? orderToJsonV2(signedOrder, this.apiKey, orderTypeEnum, false, false)
+      : {
+          deferExec: false,
+          postOnly: false,
+          order: signedOrder,
+          owner: this.apiKey,
+          orderType,
+        };
+
+    // Gera headers L2
+    const path = '/order';
+    const bodyStr = JSON.stringify(payload);
+    const headers = await createL2Headers(
+      this.viemWallet || this.wallet,
+      { key: this.apiKey, secret: this.apiSecret, passphrase: this.passphrase },
+      { method: 'POST', requestPath: path, body: bodyStr },
+    );
+
+    // POST via axios direto com proxy
+    const proxyAgent = this._getProxyAgent();
+    const t0 = Date.now();
+
+    const resp = await axios({
+      method: 'POST',
+      url: `${this.clobUrl}${path}`,
+      data: payload,
+      headers,
+      timeout: 15_000,
+      maxRedirects: 0,
+      httpsAgent: proxyAgent || clobAgent,
+      proxy: false,
+    });
+
+    const postLatencyMs = Date.now() - t0;
+    console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${wireSigType}, maker=${signedOrder.maker || 'n/a'})`);
+
+    const data = resp.data;
+
+    if (data && data.error) {
+      const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+      this._lastOrderError = this._classifyOrderError(errStr, 200);
+      console.error(`[Polymarket] order FAILED (200 com error): ${errStr.slice(0, 300)}`);
+      return null;
+    }
+
+    return data;
+
+  } catch (err) {
+    const status = err.response?.status || 'no-status';
+    const data = err.response?.data
+      ? JSON.stringify(err.response.data).slice(0, 300)
+      : err.message;
+    this._lastOrderError = this._classifyOrderError(
+      err.response?.data?.error || err.message || 'unknown',
+      typeof status === 'number' ? status : null,
+    );
+    console.error(`[Polymarket] order FAILED (HTTP ${status}): ${data}`);
+    return null;
+  }
+}
 
   /**
    * Parse a CLOB error string into structured hedge-actionable metadata.
