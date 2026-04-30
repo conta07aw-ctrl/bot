@@ -931,8 +931,7 @@ class PolymarketConnector extends EventEmitter {
       return null;
     }
 
-    // Reset last-error so the hedge never reads stale data from a prior call.
-    this._lastOrderError = null;
+  this._lastOrderError = null;
 
     try {
       const { orderToJsonV2 } = require('@polymarket/clob-client-v2');
@@ -1025,7 +1024,22 @@ class PolymarketConnector extends EventEmitter {
       if (location) console.error(`[Polymarket] redirect location: ${location}`);
       return null;
     }
+
+    return data;
+
+  } catch (err) {
+    const status = err.response?.status || 'no-status';
+    const data = err.response?.data
+      ? JSON.stringify(err.response.data).slice(0, 300)
+      : err.message;
+    this._lastOrderError = this._classifyOrderError(
+      err.response?.data?.error || err.message || 'unknown',
+      typeof status === 'number' ? status : null,
+    );
+    console.error(`[Polymarket] order FAILED (HTTP ${status}): ${data}`);
+    return null;
   }
+}
 
   /**
    * Parse a CLOB error string into structured hedge-actionable metadata.
