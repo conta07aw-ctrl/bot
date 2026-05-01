@@ -1049,20 +1049,6 @@ class PolymarketConnector extends EventEmitter {
       if (location) console.error(`[Polymarket] redirect location: ${location}`);
       return null;
     }
-
-    return data;
-
-  } catch (err) {
-    const status = err.response?.status || 'no-status';
-    const data = err.response?.data
-      ? JSON.stringify(err.response.data).slice(0, 300)
-      : err.message;
-    this._lastOrderError = this._classifyOrderError(
-      err.response?.data?.error || err.message || 'unknown',
-      typeof status === 'number' ? status : null,
-    );
-    console.error(`[Polymarket] order FAILED (HTTP ${status}): ${data}`);
-    return null;
   }
 
   /**

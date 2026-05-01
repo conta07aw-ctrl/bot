@@ -464,7 +464,10 @@ class Dispatcher {
       const rawCombined = kalshiLivePrice + polyLiveAsk;
       const kalshiFee = signal.kalshiFee ?? 0;
       const polyFee = signal.polyFee ?? 0;
-      const worstFee = Math.max((1 - kalshiLivePrice) * kalshiFee, (1 - polyLiveAsk) * polyFee);
+      const worstFee = Math.max(
+        kalshiLivePrice * (1 - kalshiLivePrice) * kalshiFee,
+        polyLiveAsk     * (1 - polyLiveAsk)     * polyFee,
+      );
       const maxCombined = (1.00 - worstFee) / (1 + (signal.minRoiPct ?? 3) / 100);
       const dynamicImprovement = Math.max(0, maxCombined - rawCombined);
       // Split improvement across BOTH legs to reduce one-sided fill risk.
@@ -495,8 +498,8 @@ class Dispatcher {
       // signal doesn't have enough ROI margin for reliable fills.
       const effectiveCombined = kalshiOrderPrice + polyOrderPrice;
       const effectiveWorstFee = Math.max(
-        (1 - kalshiOrderPrice) * kalshiFee,
-        (1 - polyOrderPrice) * polyFee,
+        kalshiOrderPrice * (1 - kalshiOrderPrice) * kalshiFee,
+        polyOrderPrice   * (1 - polyOrderPrice)   * polyFee,
       );
       const effectiveNet = 1.0 - effectiveCombined - effectiveWorstFee;
       const effectiveRoi = effectiveCombined > 0 ? (effectiveNet / effectiveCombined) * 100 : 0;
@@ -657,6 +660,12 @@ class Dispatcher {
       if (matchedQty > 0) {
         const entryRoiPct = signal.roiPct ?? signal.minRoiPct ?? 3;
         const polyFilledQtySafe = Math.max(0, Number(polyFilledQty || 0));
+        // Tokens reais recebidos da Poly após descontar fee em tokens
+        // _realTokensReceived = size - (fee_usdc / price)
+        // Sem isso, o early exit tenta vender mais tokens do que tem → CLOB rejeita
+        const polyRealTokens = (polyResult?._realTokensReceived != null && polyResult._realTokensReceived > 0)
+          ? Math.floor(polyResult._realTokensReceived * 100) / 100  // floor 2 decimais — CLOB exige
+          : polyFilledQtySafe;
         this._openPositions.push({
           id: result.id,
           asset: signal.asset,
@@ -682,12 +691,13 @@ class Dispatcher {
           realPolyFee:   polyResult?._realFee   ?? null,
           kalshiFee: signal.kalshiFee ?? 0,
           polyFee: signal.polyFee ?? 0,
-          polyFilledQty: polyFilledQtySafe,
+          polyFilledQty: polyRealTokens,  // tokens reais após fee (não sizeMatched pré-fee)
+          polyFilledQtyRaw: polyFilledQtySafe, // original para referência
           entryRoiPct,
           entryTime: Date.now(),
           readyAt: Date.now() + 15_000,
         });
-        console.log(`[EarlyExit] tracking position: ${signal.asset} Leg${signal.leg} x${matchedQty} polyTokens=${polyFilledQtySafe.toFixed(2)} cost=$${(kalshiOrderPrice + polyOrderPrice).toFixed(3)} minExitROI=${entryRoiPct.toFixed(2)}% (ready in 15s)`);
+        console.log(`[EarlyExit] tracking position: ${signal.asset} Leg${signal.leg} x${matchedQty} polyTokens=${polyRealTokens.toFixed(2)} (raw=${polyFilledQtySafe.toFixed(2)}) cost=${(kalshiOrderPrice + polyOrderPrice).toFixed(3)} minExitROI=${entryRoiPct.toFixed(2)}% (ready in 15s)`);
       }
 
       return result;
@@ -1036,8 +1046,8 @@ class Dispatcher {
       const polyFeeRate   = signal.polyFee ?? 0;
       const worstFee = matchedQty > 0
         ? Math.max(
-            (1.0 - (result.kalshiPrice || 0)) * kalshiFeeRate,
-            (1.0 - (result.polyPrice || 0))   * polyFeeRate,
+            (result.kalshiPrice || 0) * (1.0 - (result.kalshiPrice || 0)) * kalshiFeeRate,
+            (result.polyPrice   || 0) * (1.0 - (result.polyPrice   || 0)) * polyFeeRate,
           )
         : 0;
 
@@ -1106,7 +1116,7 @@ class Dispatcher {
         const combined = kP + pP;
         const kFee = signal.kalshiFee ?? 0;
         const pFee = signal.polyFee ?? 0;
-        const worstFee = Math.max((1 - kP) * kFee, (1 - pP) * pFee);
+        const worstFee = Math.max(kP * (1 - kP) * kFee, pP * (1 - pP) * pFee);
         const net = 1 - combined - worstFee;
         const roi = combined > 0 ? (net / combined * 100).toFixed(1) : '0.0';
         return ` cost=$${combined.toFixed(2)} roi=${roi}%`;
@@ -1183,12 +1193,14 @@ class Dispatcher {
       return { ok: false, reason: `no arb (combined=$${combined.toFixed(4)})`, roiPct: 0, units: 0 };
     }
 
-    // Worst-case fees — same formula as decisionEngine
+    // Fórmula oficial Kalshi: fee = P × (1-P) × 0.07
+    // Fórmula oficial Poly: fee = p × feeRate × (p×(1-p))^1
     const kalshiFee = signal.kalshiFee ?? 0;
     const polyFee = signal.polyFee ?? 0;
-    const kalshiProfit = 1.0 - kalshiPrice;
-    const polyProfit = 1.0 - polyPrice;
-    const maxFee = Math.max(kalshiProfit * kalshiFee, polyProfit * polyFee);
+    const maxFee = Math.max(
+      kalshiPrice * (1 - kalshiPrice) * kalshiFee,
+      polyPrice   * (1 - polyPrice)   * polyFee,
+    );
 
     const grossSpread = 1.0 - combined;
     const netProfit = grossSpread - maxFee;

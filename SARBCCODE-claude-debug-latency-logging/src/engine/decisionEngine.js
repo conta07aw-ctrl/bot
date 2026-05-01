@@ -213,9 +213,12 @@ class DecisionEngine {
     const kalshiProfit = 1.0 - kalshiPrice;
     const polyProfit = 1.0 - polyPrice;
 
-    // Worst-case fee scenario (conservative)
-    const feeIfKalshiWins = kalshiProfit * this.kalshiFee;
-    const feeIfPolyWins = polyProfit * this.polyFee;
+    // Fórmula oficial Kalshi: fee = 0.07 × price × (1 - price)
+    // NÃO é (1-price) × 0.07 — essa fórmula superestima em 2.5x e bloqueia trades válidos
+    // Fonte: kalshi.com/fee-schedule — taker fee = C × P × (1-P) × 0.07
+    const feeIfKalshiWins = kalshiPrice * (1 - kalshiPrice) * this.kalshiFee;
+    // Polymarket: fee = C × p × feeRate × (p×(1-p))^1 — cobrada em tokens na compra
+    const feeIfPolyWins = polyPrice * (1 - polyPrice) * this.polyFee;
     const maxFee = Math.max(feeIfKalshiWins, feeIfPolyWins);
 
     // Net profit per unit after fees
