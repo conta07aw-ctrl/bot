@@ -170,6 +170,10 @@ function createServer(monitor, decision, capitalGuard, dispatcher, autoRedeemer,
         dispatcher.tradeMode = saved.tradeMode;
         console.log(`[Dispatcher] trade mode changed to: ${saved.tradeMode}`);
       }
+      if (dispatcher && saved.earlyExitThreshold != null) {
+        dispatcher.earlyExitThreshold = parseFloat(saved.earlyExitThreshold);
+        console.log(`[Dispatcher] earlyExitThreshold changed to: ${dispatcher.earlyExitThreshold.toFixed(2)}`);
+      }
 
       res.json(saved);
     } catch (err) {

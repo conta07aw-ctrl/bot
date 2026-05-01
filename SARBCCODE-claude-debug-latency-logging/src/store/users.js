@@ -181,6 +181,7 @@ async function createUser(username, password, inviteCode) {
       tradeMode: 'dry-run',
       kalshiStopAt: 0,      // 0 = no stop, >0 = stop if balance below this
       polyStopAt: 0,
+      earlyExitThreshold: 0.20,
       telegramEnabled: false,
       telegramBotToken: '',
       telegramChatId: '',

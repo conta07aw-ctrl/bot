@@ -41,6 +41,7 @@ class Dispatcher {
     this._earlyExitListening = false;
     this._earlyExitTickHandler = null;
     this._checkingExits = false;
+    this.earlyExitThreshold = 0.20;
 
     // Global toggle: when true, step 1 reads top-of-book from the in-memory
     // WS cache (~20ms). When false, falls back to REST (~150-1800ms).
@@ -1387,7 +1388,7 @@ class Dispatcher {
         }
 
         // Only exit when net profit (after ALL fees) exceeds $0.20
-        const MIN_EXIT_PROFIT = 0.20;
+        const MIN_EXIT_PROFIT = this.earlyExitThreshold ?? 0.20;
         if (netProfit < MIN_EXIT_PROFIT) continue;
 
         pos._exiting = true;

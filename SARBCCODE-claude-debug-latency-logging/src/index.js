@@ -142,6 +142,10 @@ async function main() {
     if (settings?.tradeMode) {
       dispatcher.tradeMode = settings.tradeMode;
     }
+    if (settings?.earlyExitThreshold != null) {
+      dispatcher.earlyExitThreshold = parseFloat(settings.earlyExitThreshold);
+      console.log(`[Dispatcher] earlyExitThreshold loaded from settings: ${dispatcher.earlyExitThreshold.toFixed(2)}`);
+    }
   }
 
   // Load global WS live-check toggle (admin-configured, default true).

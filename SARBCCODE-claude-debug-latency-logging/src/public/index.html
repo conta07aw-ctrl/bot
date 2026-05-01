@@ -314,6 +314,11 @@
               <input type="number" id="set-polyStopAt" step="10" min="0">
               <div class="form-hint">Stop trading if Polymarket balance drops below this. 0 = no stop.</div>
             </div>
+            <div class="form-group">
+              <label>Early Exit Threshold ($)</label>
+              <input type="number" id="set-earlyExitThreshold" step="0.05" min="0" value="0.20">
+              <div class="form-hint">Minimum net profit to trigger early exit of an open position. Default: $0.20.</div>
+            </div>
           </div>
         </div>
       </div>

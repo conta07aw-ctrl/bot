@@ -18,18 +18,19 @@
       "polyStopAt": 0,
       "telegramEnabled": false,
       "telegramBotToken": "",
-      "telegramChatId": ""
+      "telegramChatId": "",
+      "earlyExitThreshold": 0.12
     },
     "filters": {
       "BTC": {
         "enabled": true,
-        "entrySize": 3,
+        "entrySize": 5,
         "minRoiPct": 3,
-        "maxStrikeDiff": 15
+        "maxStrikeDiff": 5
       },
       "ETH": {
         "enabled": true,
-        "entrySize": 3,
+        "entrySize": 5,
         "minRoiPct": 3,
         "maxStrikeDiff": 2
       },
