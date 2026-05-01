@@ -146,6 +146,10 @@ async function main() {
       dispatcher.earlyExitThreshold = parseFloat(settings.earlyExitThreshold);
       console.log(`[Dispatcher] earlyExitThreshold loaded from settings: ${dispatcher.earlyExitThreshold.toFixed(2)}`);
     }
+    if (settings?.earlyExitPct != null) {
+      dispatcher.earlyExitPct = parseFloat(settings.earlyExitPct);
+      console.log(`[Dispatcher] earlyExitPct loaded from settings: ${dispatcher.earlyExitPct}%`);
+    }
   }
 
   // Load global WS live-check toggle (admin-configured, default true).

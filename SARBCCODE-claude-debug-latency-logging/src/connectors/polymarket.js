@@ -1001,6 +1001,29 @@ class PolymarketConnector extends EventEmitter {
       console.log(`[Polymarket] POST /order latency: ${postLatencyMs}ms (proxy=${proxyAgent ? 'on' : 'off'}, sigType=${wireSigType}, maker=${signedOrder.maker || 'n/a'})`);
       const data = resp.data;
 
+      // Calcular fee real com fórmula oficial Polymarket (docs.polymarket.com/trading/fees)
+      // fee = C × p × feeRate × (p × (1-p))^exponent
+      if (data && !data.error) {
+        const cachedFeeRateBps = this._feeRateCache.get(tokenId);
+        if (cachedFeeRateBps != null) {
+          const feeRate = parseFloat(cachedFeeRateBps) / 10000;
+          // Fórmula oficial Polymarket pós março 2026 (docs.polymarket.com/trading/fees)
+          // fee_usdc = C × p × feeRate × (p × (1-p))^exponent
+          // Crypto BTC/ETH: feeRate=0.072 (7200bps), exponent=1
+          // IMPORTANTE: fee é cobrada em TOKENS nas compras, não em USDC
+          // tokens_fee = fee_usdc / price → você recebe MENOS tokens que o solicitado
+          const exponent = 1;
+          const feeUsdc = size * price * feeRate * Math.pow(price * (1 - price), exponent);
+          const tokensDeducted = price > 0 ? feeUsdc / price : 0;
+          data._realFee          = feeUsdc;
+          data._realFeeTokens    = tokensDeducted;
+          data._realTokensReceived = size - tokensDeducted;
+          // _realCost: prefere makingAmount (USDC real pago), fallback para price*size
+          const makingAmt = parseFloat(data.makingAmount || 0);
+          data._realCost = makingAmt > 0 ? makingAmt : price * size + feeUsdc;
+        }
+      }
+
       // CLOB returns 200 with {error: "..."} on validation failures
       if (data && data.error) {
         const errStr = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);

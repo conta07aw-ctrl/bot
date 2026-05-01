@@ -19,7 +19,8 @@
       "telegramEnabled": false,
       "telegramBotToken": "",
       "telegramChatId": "",
-      "earlyExitThreshold": 0.12
+      "earlyExitThreshold": 0.2,
+      "earlyExitPct": 80
     },
     "filters": {
       "BTC": {

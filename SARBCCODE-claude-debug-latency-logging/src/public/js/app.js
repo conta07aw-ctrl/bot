@@ -235,6 +235,7 @@ async function loadSettings() {
     if (s.kalshiStopAt != null) document.getElementById('set-kalshiStopAt').value = s.kalshiStopAt;
     if (s.polyStopAt != null) document.getElementById('set-polyStopAt').value = s.polyStopAt;
     if (s.earlyExitThreshold != null) document.getElementById('set-earlyExitThreshold').value = s.earlyExitThreshold;
+    if (s.earlyExitPct != null) document.getElementById('set-earlyExitPct').value = s.earlyExitPct;
     document.getElementById('set-telegramEnabled').checked = !!s.telegramEnabled;
     if (s.telegramBotToken) document.getElementById('set-telegramBotToken').value = s.telegramBotToken;
     if (s.telegramChatId) document.getElementById('set-telegramChatId').value = s.telegramChatId;
@@ -247,6 +248,7 @@ async function saveSettings() {
     kalshiStopAt: parseFloat(document.getElementById('set-kalshiStopAt').value) || 0,
     polyStopAt: parseFloat(document.getElementById('set-polyStopAt').value) || 0,
     earlyExitThreshold: parseFloat(document.getElementById('set-earlyExitThreshold').value) || 0.20,
+    earlyExitPct: parseFloat(document.getElementById('set-earlyExitPct').value) || 80,
     telegramEnabled: document.getElementById('set-telegramEnabled').checked,
     telegramBotToken: document.getElementById('set-telegramBotToken').value.trim(),
     telegramChatId: document.getElementById('set-telegramChatId').value.trim(),

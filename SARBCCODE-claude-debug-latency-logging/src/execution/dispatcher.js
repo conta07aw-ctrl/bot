@@ -41,7 +41,8 @@ class Dispatcher {
     this._earlyExitListening = false;
     this._earlyExitTickHandler = null;
     this._checkingExits = false;
-    this.earlyExitThreshold = 0.20;
+    this.earlyExitThreshold = 0.20; // fallback em $ quando ROI não disponível
+    this.earlyExitPct = 80; // % do lucro esperado para saída antecipada (configurável)
 
     // Global toggle: when true, step 1 reads top-of-book from the in-memory
     // WS cache (~20ms). When false, falls back to REST (~150-1800ms).
@@ -668,6 +669,17 @@ class Dispatcher {
           polySide: signal.polySide,
           polyPrice: polyOrderPrice,
           entryCost: kalshiOrderPrice + polyOrderPrice,
+          // Custo real total pago (com fees reais das APIs)
+          // Kalshi: taker_fill_cost_dollars já inclui o custo dos contratos
+          // Poly: price × qty + fee calculada pela fórmula oficial
+          realEntryCost: (kalshiResult?._realCost != null && kalshiResult._realCost > 0
+                           ? kalshiResult._realCost
+                           : kalshiOrderPrice * matchedQty)
+                       + (polyResult?._realCost != null && polyResult._realCost > 0
+                           ? polyResult._realCost
+                           : polyOrderPrice * matchedQty),
+          realKalshiFee: kalshiResult?._realFee ?? null,
+          realPolyFee:   polyResult?._realFee   ?? null,
           kalshiFee: signal.kalshiFee ?? 0,
           polyFee: signal.polyFee ?? 0,
           polyFilledQty: polyFilledQtySafe,
@@ -1367,9 +1379,11 @@ class Dispatcher {
         const netCloseValue = kalshiNetValue + polyNetValue;
 
         // Total cost INCLUDING entry fees (what we actually paid)
-        const kalshiEntryCost = pos.kalshiPrice * (1 + pos.kalshiFee) * pos.qty;
-        const polyEntryCost = pos.polyPrice * (1 + pos.polyFee) * pos.qty;
-        const totalCost = kalshiEntryCost + polyEntryCost;
+        // Usa realEntryCost (fees reais das APIs) se disponível, senão estima
+        const totalCost = (pos.realEntryCost != null && pos.realEntryCost > 0)
+          ? pos.realEntryCost
+          : (pos.kalshiPrice * (1 + pos.kalshiFee) * pos.qty)
+          + (pos.polyPrice   * (1 + pos.polyFee)   * pos.qty);
 
         // Net profit after ALL fees (entry + exit)
         const netProfit = netCloseValue - totalCost;
@@ -1387,8 +1401,18 @@ class Dispatcher {
           );
         }
 
-        // Only exit when net profit (after ALL fees) exceeds $0.20
-        const MIN_EXIT_PROFIT = this.earlyExitThreshold ?? 0.20;
+        // Early exit dinâmico: gatilho = earlyExitPct% do lucro esperado da posição
+        // lucroEsperado = custo_real_entrada × (roiEntrada / 100)
+        // Se ROI não disponível, usa earlyExitThreshold em $ como fallback
+        const entryCostForCalc = (pos.realEntryCost != null && pos.realEntryCost > 0)
+          ? pos.realEntryCost
+          : pos.entryCost * pos.qty;
+        const expectedProfit = entryCostForCalc > 0 && pos.entryRoiPct > 0
+          ? entryCostForCalc * (pos.entryRoiPct / 100)
+          : 0;
+        const MIN_EXIT_PROFIT = expectedProfit > 0
+          ? expectedProfit * ((this.earlyExitPct ?? 80) / 100)
+          : (this.earlyExitThreshold ?? 0.20);
         if (netProfit < MIN_EXIT_PROFIT) continue;
 
         pos._exiting = true;
@@ -1472,9 +1496,11 @@ class Dispatcher {
     const totalRevenue = (kalshiGross - kalshiSellFee) + (polyGross - polySellFee);
 
     // --- Cost including entry fees ---
-    const kalshiEntryCost = pos.kalshiPrice * (1 + pos.kalshiFee) * pos.qty;
-    const polyEntryCost = pos.polyPrice * (1 + pos.polyFee) * pos.qty;
-    const totalCost = kalshiEntryCost + polyEntryCost;
+    // Usa realEntryCost (fees reais das APIs) se disponível, senão estima
+    const totalCost = (pos.realEntryCost != null && pos.realEntryCost > 0)
+      ? pos.realEntryCost
+      : (pos.kalshiPrice * (1 + pos.kalshiFee) * pos.qty)
+      + (pos.polyPrice   * (1 + pos.polyFee)   * pos.qty);
 
     const pnl = Math.round((totalRevenue - totalCost) * 100) / 100;
 

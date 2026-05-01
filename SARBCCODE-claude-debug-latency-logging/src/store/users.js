@@ -182,6 +182,7 @@ async function createUser(username, password, inviteCode) {
       kalshiStopAt: 0,      // 0 = no stop, >0 = stop if balance below this
       polyStopAt: 0,
       earlyExitThreshold: 0.20,
+      earlyExitPct: 80,
       telegramEnabled: false,
       telegramBotToken: '',
       telegramChatId: '',

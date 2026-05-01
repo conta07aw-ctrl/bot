@@ -911,12 +911,21 @@ class KalshiConnector extends EventEmitter {
 
       if (status === 'executed') {
         result._actualFilled = fillCount > 0 ? fillCount : order.count;
+        // Campos reais da API Kalshi (docs.kalshi.com/api-reference/orders/create-order)
+        result._realCost  = parseFloat(result.order?.taker_fill_cost_dollars || 0);
+        result._realFee   = parseFloat(result.order?.taker_fees_dollars || 0);
+        result._realQty   = parseFloat(result.order?.fill_count_fp || 0);
+        result._realPrice = result._realQty > 0 ? result._realCost / result._realQty : order.price;
         return result;
       }
 
       if (status === 'canceled' && fillCount > 0) {
         console.log(`[Kalshi] IOC partial fill: ${fillCount}/${order.count} filled, rest canceled`);
         result._actualFilled = fillCount;
+        result._realCost  = parseFloat(result.order?.taker_fill_cost_dollars || 0);
+        result._realFee   = parseFloat(result.order?.taker_fees_dollars || 0);
+        result._realQty   = parseFloat(result.order?.fill_count_fp || 0);
+        result._realPrice = result._realQty > 0 ? result._realCost / result._realQty : order.price;
         return result;
       }
 

@@ -174,6 +174,10 @@ function createServer(monitor, decision, capitalGuard, dispatcher, autoRedeemer,
         dispatcher.earlyExitThreshold = parseFloat(saved.earlyExitThreshold);
         console.log(`[Dispatcher] earlyExitThreshold changed to: ${dispatcher.earlyExitThreshold.toFixed(2)}`);
       }
+      if (dispatcher && saved.earlyExitPct != null) {
+        dispatcher.earlyExitPct = parseFloat(saved.earlyExitPct);
+        console.log(`[Dispatcher] earlyExitPct changed to: ${dispatcher.earlyExitPct}%`);
+      }
 
       res.json(saved);
     } catch (err) {
